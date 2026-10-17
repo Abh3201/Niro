@@ -1,0 +1,36 @@
+:root {
+  color-scheme: light dark;
+  --board-bg: #f7f7f8;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --board-bg: #18181b;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.board {
+  position: fixed;
+  inset: 0;
+  background: var(--board-bg);
+  /* The engine handles every pointer gesture itself, including pinch and pan. */
+  touch-action: none;
+}
+
+.error-page {
+  padding: 4rem 1rem;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.error-page pre {
+  overflow-x: auto;
+}

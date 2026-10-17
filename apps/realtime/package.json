@@ -1,0 +1,20 @@
+{
+  "name": "@niro/realtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Realtime WebSocket server: rooms, sync, presence and persistence.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15"
+  }
+}
