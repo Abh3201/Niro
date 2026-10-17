@@ -1,0 +1,19 @@
+{
+  "name": "@niro/lab-l6-yjs-vs-loro",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lab L6: Yjs vs Loro for Niro's document model.",
+  "scripts": {
+    "bench": "tsx src/bench.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "loro-crdt": "^1.16.4",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  }
+}
