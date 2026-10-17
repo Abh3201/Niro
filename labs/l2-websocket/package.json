@@ -1,0 +1,16 @@
+{
+  "name": "@niro/lab-l2-websocket",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lab L2: a WebSocket server written on raw node:net, tested against the ws client.",
+  "scripts": {
+    "start": "tsx src/echo.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "ws": "^8.22.0"
+  }
+}

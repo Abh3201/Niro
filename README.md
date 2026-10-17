@@ -49,7 +49,8 @@ apps/web          React Router v8 app: the board UI and HTTP API
 apps/realtime     WebSocket server: rooms, sync, presence, persistence
 packages/engine   Framework-free canvas engine (no React, no Yjs)
 packages/doc      Document model: shape types, DocStore, z-order and tree rules; Yjs adapter in @niro/doc/yjs
-labs/             Learning labs (L6: Yjs vs Loro spike and benchmark)
+packages/netsim   Deterministic simulated network for fault-injection tests
+labs/             Learning labs: L2 WebSocket from scratch, L3 own sync, L6 Yjs vs Loro
 docs/decisions    Decision records, with the evidence behind them
 docs/learning     Write-ups from the learning labs
 ```
