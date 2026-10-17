@@ -42,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Make a secret, as the README says to
+        run: echo "NIRO_SECRET=$(openssl rand -hex 32)" > .env
       - run: docker compose up --build --wait --wait-timeout 300
       - name: Web app serves the board
         # "/" redirects to a new board at /b/<id>; -L follows it.

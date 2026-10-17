@@ -184,11 +184,35 @@ describe("YDocStore", () => {
     expect(doc.getMap("shapes").has("x1")).toBe(true);
   });
 
-  it("stamps new boards with the schema version", () => {
+  it("stamps a new board with the schema version on its first edit, not on open", () => {
     const doc = new Y.Doc();
     const store = createYDocStore(doc);
-    expect(doc.getMap("meta").get("schemaVersion")).toBe(SCHEMA_VERSION);
+    expect(doc.getMap("meta").has("schemaVersion")).toBe(false);
     expect(store.readOnly).toBe(false);
+    store.transact((tx) => tx.add(rect("s1")));
+    expect(doc.getMap("meta").get("schemaVersion")).toBe(SCHEMA_VERSION);
+    store.undo();
+    // Undo removes the shape but not the version.
+    expect(doc.getMap("meta").get("schemaVersion")).toBe(SCHEMA_VERSION);
+  });
+
+  it("an empty client that then receives a newer board becomes read-only, having written nothing", () => {
+    const newer = new Y.Doc();
+    newer.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(newer));
+    expect(store.readOnly).toBe(true);
+    expect(Y.decodeStateVector(Y.encodeStateVector(doc)).has(doc.clientID)).toBe(false);
+  });
+
+  it("a view-only store ignores edits and writes nothing", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc, { readOnly: true });
+    store.transact((tx) => tx.add(rect("s1")));
+    expect(store.readOnly).toBe(true);
+    expect(store.get(id("s1"))).toBeUndefined();
+    expect(Y.encodeStateVector(doc)).toEqual(Y.encodeStateVector(new Y.Doc()));
   });
 
   it("opens a board from a newer version read-only and leaves it untouched", () => {

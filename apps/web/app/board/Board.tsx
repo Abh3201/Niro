@@ -1,20 +1,27 @@
 import { createEngine, type Engine } from "@niro/engine";
-import { useEffect, useRef, useState } from "react";
-import { openLocalBoard } from "./local-board";
+import type { SyncStatus } from "@niro/sync";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { currentKey } from "./access";
+import { type OpenBoard, openBoard } from "./open-board";
+import { PresenceBar } from "./PresenceBar";
 import { SelectionPanel } from "./SelectionPanel";
 import { Toolbar } from "./Toolbar";
 import { useEngineState } from "./useEngineState";
 import { ZoomControls } from "./ZoomControls";
+
+interface Session {
+  readonly engine: Engine;
+  readonly board: OpenBoard;
+}
 
 /**
  * Hosts the canvas engine. React renders only the container and the controls
  * around it; the engine creates and draws its own canvases outside React's
  * render cycle, and the document never enters React state.
  */
-export function Board({ boardId }: { boardId: string }) {
+export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [engine, setEngine] = useState<Engine | null>(null);
-  const [saved, setSaved] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -23,17 +30,21 @@ export function Board({ boardId }: { boardId: string }) {
     let cancelled = false;
     let cleanup: (() => void) | null = null;
 
-    openLocalBoard(boardId)
+    openBoard({ boardId, key: currentKey(boardId), realtimeUrl })
       .then((board) => {
         if (cancelled) {
           board.destroy();
           return;
         }
-        const instance = createEngine(container, { doc: board.store });
-        setEngine(instance);
-        setSaved(board.saved);
+        const engine = createEngine(container, {
+          doc: board.store,
+          onPointerMove: board.presence.pointerMoved,
+        });
+        const detach = board.presence.attach(engine);
+        setSession({ engine, board });
         cleanup = () => {
-          instance.destroy();
+          detach();
+          engine.destroy();
           board.destroy();
         };
       })
@@ -45,9 +56,9 @@ export function Board({ boardId }: { boardId: string }) {
     return () => {
       cancelled = true;
       cleanup?.();
-      setEngine(null);
+      setSession(null);
     };
-  }, [boardId]);
+  }, [boardId, realtimeUrl]);
 
   return (
     <>
@@ -55,40 +66,54 @@ export function Board({ boardId }: { boardId: string }) {
         ref={containerRef}
         className="board"
         data-testid="board"
-        data-ready={engine ? "true" : "false"}
+        data-ready={session ? "true" : "false"}
       />
       {failed && (
         <p className="panel notice" role="alert">
           This board could not be opened. Reload the page to try again.
         </p>
       )}
-      {engine && (
+      {session && (
         <>
-          <Toolbar engine={engine} />
-          <SelectionPanel engine={engine} />
-          <ZoomControls engine={engine} />
-          <BoardStatus engine={engine} saved={saved} />
+          <Toolbar engine={session.engine} />
+          <SelectionPanel engine={session.engine} />
+          <ZoomControls engine={session.engine} />
+          <PresenceBar boardId={boardId} board={session.board} />
+          <BoardStatus engine={session.engine} board={session.board} />
         </>
       )}
     </>
   );
 }
 
-/** Announces counts to screen readers and warns when the board can't be edited or saved. */
-function BoardStatus({ engine, saved }: { engine: Engine; saved: boolean }) {
+/** Announces counts to screen readers and explains when the board can't be edited or saved. */
+function BoardStatus({ engine, board }: { engine: Engine; board: OpenBoard }) {
   const shapes = useEngineState(engine, (s) => s.shapeCount, 0);
   const selected = useEngineState(engine, (s) => s.selection.length, 0);
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
+  const status = useSyncExternalStore<SyncStatus>(
+    board.status.subscribe,
+    board.status.get,
+    () => "connecting",
+  );
+
+  let notice: string | null = null;
+  if (status === "denied") {
+    notice = "This link doesn't give access to this board. Ask whoever shared it for a new link.";
+  } else if (readOnly && board.role === "edit") {
+    notice = "This board was saved by a newer version of Niro, so it is read-only here.";
+  } else if (!board.saved) {
+    notice = "This browser isn't saving boards, so changes may be lost when you close the tab.";
+  }
+
   return (
     <>
       <p className="visually-hidden" role="status" data-testid="board-status">
         {`${shapes} ${shapes === 1 ? "shape" : "shapes"}, ${selected} selected`}
       </p>
-      {(readOnly || !saved) && (
+      {notice && (
         <p className="panel notice" role="alert">
-          {readOnly
-            ? "This board was saved by a newer version of Niro, so it is read-only here."
-            : "This browser isn't saving boards, so changes will be lost when you close the tab."}
+          {notice}
         </p>
       )}
     </>

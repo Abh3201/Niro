@@ -12,3 +12,7 @@ Each lab in the roadmap ends with a short write-up here, explaining the idea in 
 | L6 | What a CRDT stores: Yjs vs Loro, tombstones, movable trees | [L6-yjs-vs-loro.md](L6-yjs-vs-loro.md) |
 | L7 | Decoding a Yjs update by hand | _not yet_ |
 | L8 | WebGL instanced shape renderer | _not yet_ |
+
+Milestone notes, on how the real thing works:
+
+- [How multiplayer works in Niro](multiplayer.md): the two-step sync, presence, cursor smoothing, backpressure, dead connections, and how it's tested (P3a).

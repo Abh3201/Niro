@@ -25,6 +25,8 @@ export interface InputHost {
   keyDown(event: KeyboardEvent): boolean;
   /** Cursor the active tool wants when no pan is happening. */
   toolCursor(): string;
+  /** A mouse or pen moved over the board (`screen`), or left it (null). Touch has no cursor. */
+  pointerMoved(screen: Point | null): void;
 }
 
 /** Safari's non-standard trackpad pinch event. */
@@ -61,6 +63,7 @@ export class InputController {
     this.listen(el, "pointermove", this.onPointerMove);
     this.listen(el, "pointerup", this.onPointerEnd);
     this.listen(el, "pointercancel", this.onPointerEnd);
+    this.listen(el, "pointerleave", this.onPointerLeave);
     this.listen(el, "wheel", this.onWheel, { passive: false });
     this.listen(el, "gesturestart", this.onGestureStart);
     this.listen(el, "gesturechange", this.onGestureChange);
@@ -151,6 +154,7 @@ export class InputController {
   private onPointerMove(event: PointerEvent): void {
     const point = this.local(event);
     this.lastPointer = point;
+    if (event.pointerType !== "touch") this.host.pointerMoved(point);
     const previous = this.pointers.get(event.pointerId);
     if (!previous) {
       if (event.pointerType === "mouse" || event.pointerType === "pen") {
@@ -205,6 +209,10 @@ export class InputController {
     }
     if (this.pan?.pointerId === event.pointerId) this.pan = null;
     this.updateCursor();
+  }
+
+  private onPointerLeave(event: PointerEvent): void {
+    if (event.pointerType !== "touch") this.host.pointerMoved(null);
   }
 
   private onWheel(event: WheelEvent): void {
