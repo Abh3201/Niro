@@ -7,8 +7,9 @@ import { isValidIndex } from "./order";
  *
  * 2: text shapes, and text on rectangles, ellipses and sticky notes.
  * 3: freehand strokes, and arrows that can be attached to shapes.
+ * 4: groups and frames, with positions inside a frame measured from the frame.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
@@ -23,12 +24,25 @@ export const SHAPE_TYPES = [
   "text",
   "freehand",
   "arrow",
+  "group",
+  "frame",
 ] as const;
 export type ShapeType = (typeof SHAPE_TYPES)[number];
 
-/** Shapes that hold text: not lines, arrows or freehand strokes. */
+/** Shapes that hold text: boxes, and frames (their name). Not lines, arrows, strokes or groups. */
 export function holdsText(type: ShapeType): boolean {
-  return type === "rectangle" || type === "ellipse" || type === "sticky" || type === "text";
+  return (
+    type === "rectangle" ||
+    type === "ellipse" ||
+    type === "sticky" ||
+    type === "text" ||
+    type === "frame"
+  );
+}
+
+/** Groups and frames: the shapes other shapes can belong to, through `parentId`. */
+export function isContainer(type: ShapeType): boolean {
+  return type === "group" || type === "frame";
 }
 
 /** Lines and arrows: two end points rather than a box. */
@@ -68,6 +82,9 @@ export const DEFAULT_COLOR: Record<ShapeType, ColorName> = {
   text: "black",
   freehand: "black",
   arrow: "black",
+  group: "black",
+  // Grey frames are the plain board surface (white, or dark in the dark theme).
+  frame: "grey",
 };
 
 /** Smallest width and height a box shape can have, in world units. */
@@ -85,6 +102,13 @@ export const MIN_SIZE = 1;
  * point, so `w` and `h` may be negative. `rotation` is always 0; rotating one
  * moves its end points. An arrow end attached to a shape (`from`, `to`)
  * follows it: the stored point is only where that end was last placed.
+ *
+ * Groups and frames hold other shapes, whose `parentId` points at them. A
+ * shape in a frame stores `(x, y)` from the top-left of the innermost frame
+ * it's in, so moving a frame writes only the frame; everywhere else, `(x, y)`
+ * is on the board. A frame is a box that never rotates. A group has no
+ * geometry of its own: it's as big as what's in it, worked out when drawn,
+ * and what's stored is ignored. Moving a group moves each shape in it.
  */
 export interface Shape {
   readonly id: ShapeId;
@@ -95,7 +119,11 @@ export interface Shape {
   readonly h: number;
   /** Radians, in [0, 2π). */
   readonly rotation: number;
-  /** Group or frame this shape belongs to; `null` means top level. */
+  /**
+   * Group or frame this shape belongs to; `null` means top level. Read it
+   * through `effectiveParents`, which ignores parents that aren't groups or
+   * frames and breaks cycles.
+   */
   readonly parentId: ShapeId | null;
   /** Fractional index: siblings are drawn in `(index, id)` order. */
   readonly index: string;
@@ -168,7 +196,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     y: finite(raw.y, 0),
     w,
     h,
-    rotation: isLine ? 0 : normalizeAngle(finite(raw.rotation, 0)),
+    rotation: isLine || !rotates(shapeType) ? 0 : normalizeAngle(finite(raw.rotation, 0)),
     parentId: typeof parentId === "string" && parentId !== id ? (parentId as ShapeId) : null,
     index: typeof index === "string" && isValidIndex(index) ? index : "a0",
     color:
@@ -180,6 +208,11 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     from: attached(raw.from),
     to: attached(raw.to),
   };
+}
+
+/** Frames and groups stay upright; lines and arrows turn by moving their ends. */
+function rotates(type: ShapeType): boolean {
+  return type !== "frame" && type !== "group";
 }
 
 /** Stroke points as stored, or none when they aren't whole triples of numbers in range. */

@@ -1,6 +1,6 @@
 import { isLinear, type Shape } from "@niro/doc";
 import { type Camera, screenToWorld, worldToScreen } from "./camera";
-import { type Box, distance, type Point, rotateAround } from "./geometry";
+import { type Box, distance, type Point, rotateAround, unionBoxes } from "./geometry";
 import { lineEnds, shapeBounds, shapeCenter } from "./shapes";
 import { HANDLE_DIRECTIONS, type Handle } from "./transform";
 
@@ -14,13 +14,15 @@ export const ROTATE_HANDLE_OFFSET = 24;
  * What the selection's handles act on:
  * - one box shape: 8 resize handles and a rotate handle in its rotated frame;
  * - one line or arrow: a handle on each end;
- * - several shapes: their combined bounding box, scaled uniformly from the
- *   corners and rotated around its center.
+ * - several shapes, or one group: their combined bounding box, scaled
+ *   uniformly from the corners and rotated around its center.
+ *
+ * Frames don't turn, so a selection with a frame in it has no rotate handle.
  */
 export type SelectionFrame =
-  | { readonly kind: "box"; readonly shape: Shape }
+  | { readonly kind: "box"; readonly shape: Shape; readonly rotatable: boolean }
   | { readonly kind: "line"; readonly shape: Shape }
-  | { readonly kind: "group"; readonly bounds: Box };
+  | { readonly kind: "group"; readonly bounds: Box; readonly rotatable: boolean };
 
 export type HandleTarget =
   | { readonly kind: "resize"; readonly handle: Handle }
@@ -33,22 +35,19 @@ export interface PlacedHandle {
   readonly at: Point;
 }
 
-export function selectionFrame(shapes: readonly Shape[]): SelectionFrame | null {
+/**
+ * The frame for the selected `shapes` (as drawn). `rotatable` is false when
+ * a frame is selected or inside what is.
+ */
+export function selectionFrame(shapes: readonly Shape[], rotatable = true): SelectionFrame | null {
   const [first] = shapes;
   if (!first) return null;
-  if (shapes.length === 1)
-    return isLinear(first.type) ? { kind: "line", shape: first } : { kind: "box", shape: first };
-  let box = shapeBounds(first);
-  for (const shape of shapes) {
-    const b = shapeBounds(shape);
-    box = {
-      minX: Math.min(box.minX, b.minX),
-      minY: Math.min(box.minY, b.minY),
-      maxX: Math.max(box.maxX, b.maxX),
-      maxY: Math.max(box.maxY, b.maxY),
-    };
-  }
-  return { kind: "group", bounds: box };
+  if (shapes.length === 1 && first.type !== "group")
+    return isLinear(first.type)
+      ? { kind: "line", shape: first }
+      : { kind: "box", shape: first, rotatable: rotatable && first.type !== "frame" };
+  const bounds = unionBoxes(shapes.map(shapeBounds));
+  return bounds && { kind: "group", bounds, rotatable };
 }
 
 /** Center of the frame in world coordinates: the pivot for rotation. */
@@ -118,6 +117,7 @@ export function placeHandles(frame: SelectionFrame, camera: Camera): PlacedHandl
       at: worldToScreen(camera, handleWorldPoint(frame, handle)),
     }),
   );
+  if (!frame.rotatable) return handles;
   const top = worldToScreen(camera, handleWorldPoint(frame, "n"));
   // "Up" in the frame's rotated coordinates: (0, -1) turned by its rotation.
   const up = { x: Math.sin(rotation), y: -Math.cos(rotation) };

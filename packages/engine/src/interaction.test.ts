@@ -1,65 +1,13 @@
-import type { DocStore, Origin, Shape, ShapeChange, ShapeId, Tx } from "@niro/doc";
+import type { Shape, ShapeId } from "@niro/doc";
 import { describe, expect, it } from "vitest";
+import { transact } from "./board-tx";
 import type { Camera } from "./camera";
 import { screenToWorld } from "./camera";
 import type { Point } from "./geometry";
 import { type EditorHost, Interaction, type ToolName, type ToolPointer } from "./interaction";
 import { Scene } from "./scene";
-
-/** A minimal in-memory DocStore: the engine must work with any implementation. */
-function memoryDoc(): DocStore {
-  const shapes = new Map<ShapeId, Shape>();
-  const listeners = new Set<(changes: readonly ShapeChange[], origin: Origin) => void>();
-  return {
-    readOnly: false,
-    get: (id) => shapes.get(id),
-    all: () => shapes.values(),
-    transact(fn) {
-      const changes: ShapeChange[] = [];
-      const tx: Tx = {
-        add(shape) {
-          shapes.set(shape.id, shape);
-          changes.push({ kind: "added", shape });
-        },
-        update(id, patch) {
-          const previous = shapes.get(id);
-          if (!previous) return;
-          const shape = { ...previous, ...patch };
-          shapes.set(id, shape);
-          changes.push({ kind: "updated", shape, previous });
-        },
-        editText(id, index, deleteCount, insert) {
-          const previous = shapes.get(id);
-          if (!previous) return;
-          const text = previous.text;
-          const shape = {
-            ...previous,
-            text: text.slice(0, index) + insert + text.slice(index + deleteCount),
-          };
-          shapes.set(id, shape);
-          changes.push({ kind: "updated", shape, previous });
-        },
-        remove(id) {
-          const previous = shapes.get(id);
-          if (!previous) return;
-          shapes.delete(id);
-          changes.push({ kind: "removed", previous });
-        },
-      };
-      fn(tx);
-      for (const listener of listeners) listener(changes, "local");
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    checkpoint() {},
-    undo() {},
-    redo() {},
-    canUndo: () => false,
-    canRedo: () => false,
-  };
-}
+import { group } from "./structure";
+import { memoryDoc } from "./test-doc";
 
 function setup() {
   const doc = memoryDoc();
@@ -69,12 +17,14 @@ function setup() {
   let tool: ToolName = "select";
   let selection: readonly ShapeId[] = [];
   let pending: (() => void) | null = null;
+  let overlays = 0;
   let interaction: Interaction | null = null;
   /** What the editor was asked to edit: a shape in the document, or a draft. */
   let editing: { id: ShapeId } | { draft: Shape } | null = null;
   const host: EditorHost = {
     doc,
     scene,
+    transact: (fn) => transact(doc, scene, fn),
     camera: () => camera,
     tool: () => tool,
     setTool(next) {
@@ -94,7 +44,9 @@ function setup() {
       pending = null;
       write?.();
     },
-    overlayChanged() {},
+    overlayChanged() {
+      overlays++;
+    },
     startEditing(id) {
       editing = { id };
     },
@@ -136,6 +88,8 @@ function setup() {
     flush: () => host.flushWrite(),
     selection: () => selection,
     editing: () => editing,
+    /** How many times the overlay was marked for a redraw. */
+    overlays: () => overlays,
   };
 }
 
@@ -165,6 +119,15 @@ describe("Interaction", () => {
     t.drag({ x: 0, y: 0 }, { x: 100, y: 100 });
     t.drag({ x: 50, y: 50 }, { x: 150, y: 80 });
     expect([...t.doc.all()][0]).toMatchObject({ x: 100, y: 30 });
+
+    // Handles come back when a drag ends, though its last write is already drawn.
+    t.interaction.pointerDown(t.pointer({ x: 150, y: 80 }));
+    t.interaction.pointerMove(t.pointer({ x: 160, y: 80 }));
+    t.interaction.pointerMove(t.pointer({ x: 150, y: 80 }));
+    t.flush();
+    const before = t.overlays();
+    t.interaction.pointerUp(t.pointer({ x: 150, y: 80 }));
+    expect(t.overlays()).toBeGreaterThan(before);
 
     t.interaction.pointerDown(t.pointer({ x: 150, y: 80 }));
     t.interaction.pointerMove(t.pointer({ x: 400, y: 400 }));
@@ -404,5 +367,130 @@ describe("Interaction", () => {
     const loose = t.scene.get(t.arrow) as Shape;
     expect(loose.x + loose.w).toBeCloseTo(600);
     expect(loose.y + loose.h).toBeCloseTo(600);
+  });
+});
+
+describe("groups and frames", () => {
+  const click = (t: ReturnType<typeof setup>, at: Point, shiftKey = false) => {
+    t.interaction.pointerDown(t.pointer(at, shiftKey));
+    t.interaction.pointerUp(t.pointer(at, shiftKey));
+  };
+  const ofType = (t: ReturnType<typeof setup>, type: Shape["type"]) =>
+    [...t.doc.all()].filter((shape) => shape.type === type).map((shape) => shape.id);
+
+  it("selects a group by any shape in it, moves it whole, and steps in with a double click", () => {
+    const t = setup();
+    t.setTool("rectangle");
+    t.drag({ x: 0, y: 0 }, { x: 50, y: 50 });
+    t.setTool("rectangle");
+    t.drag({ x: 100, y: 0 }, { x: 150, y: 50 });
+    const [a, b] = ofType(t, "rectangle") as [ShapeId, ShapeId];
+    let g: ShapeId | null = null;
+    t.doc.transact((tx) => {
+      g = group(t.scene, tx, [a, b]);
+    });
+
+    click(t, { x: 600, y: 600 });
+    click(t, { x: 25, y: 25 });
+    expect(t.selection()).toEqual([g]);
+    t.drag({ x: 125, y: 25 }, { x: 125, y: 125 });
+    expect(t.doc.get(a)).toMatchObject({ y: 100 });
+    expect(t.doc.get(b)).toMatchObject({ y: 100 });
+
+    t.interaction.doubleClick(t.pointer({ x: 125, y: 125 }));
+    expect(t.selection()).toEqual([b]);
+    // Inside the group now, a click picks its other shape on its own.
+    click(t, { x: 25, y: 125 });
+    expect(t.selection()).toEqual([a]);
+  });
+
+  it("draws a frame around shapes, which then move with it and leave it when dragged out", () => {
+    const t = setup();
+    t.setTool("sticky");
+    click(t, { x: 200, y: 200 });
+    t.setTool("frame");
+    t.drag({ x: 0, y: 0 }, { x: 400, y: 400 });
+    const [frame] = ofType(t, "frame") as [ShapeId];
+    const [sticky] = ofType(t, "sticky") as [ShapeId];
+    expect(t.doc.get(sticky)?.parentId).toBe(frame);
+    expect(t.scene.childrenOf(null)).toEqual([frame]);
+    expect(t.selection()).toEqual([frame]);
+    expect(t.tool()).toBe("select");
+
+    // Dragged by its name, the frame carries the sticky note, which is
+    // stored where it is in the frame and so isn't written at all.
+    const stored = t.doc.get(sticky);
+    t.drag({ x: 50, y: -10 }, { x: 150, y: -10 });
+    expect(t.doc.get(frame)).toMatchObject({ x: 100, y: 0 });
+    expect(t.scene.get(sticky)).toMatchObject({ x: 200, y: 100 });
+    expect(t.doc.get(sticky)).toBe(stored);
+
+    // Dragged out of the frame, the sticky note leaves it.
+    t.drag({ x: 300, y: 200 }, { x: 800, y: 200 });
+    expect(t.doc.get(sticky)).toMatchObject({ parentId: null, x: 700 });
+    expect(t.scene.childrenOf(null)).toEqual([frame, sticky]);
+
+    // Dragged back in, it joins again; Escape puts it back outside.
+    t.interaction.pointerDown(t.pointer({ x: 800, y: 200 }));
+    t.interaction.pointerMove(t.pointer({ x: 300, y: 200 }));
+    t.flush();
+    expect(t.doc.get(sticky)?.parentId).toBe(frame);
+    t.interaction.cancel();
+    expect(t.doc.get(sticky)).toMatchObject({ parentId: null, x: 700 });
+  });
+
+  it("selects inside a frame with a marquee, and lets go of what a resize leaves outside", () => {
+    const t = setup();
+    t.setTool("rectangle");
+    t.drag({ x: 20, y: 20 }, { x: 60, y: 60 });
+    t.setTool("rectangle");
+    t.drag({ x: 300, y: 20 }, { x: 340, y: 60 });
+    t.setTool("frame");
+    t.drag({ x: 0, y: 0 }, { x: 400, y: 200 });
+    const [a, b] = ofType(t, "rectangle") as [ShapeId, ShapeId];
+    const [frame] = ofType(t, "frame") as [ShapeId];
+    expect(t.scene.childrenOf(frame)).toEqual([a, b]);
+
+    // A marquee started inside the frame selects what's in it, not the frame.
+    click(t, { x: 600, y: 600 });
+    t.drag({ x: 10, y: 10 }, { x: 100, y: 100 });
+    expect(t.selection()).toEqual([a]);
+    // One around the whole frame selects just the frame.
+    t.drag({ x: -50, y: -50 }, { x: 450, y: 250 });
+    expect(t.selection()).toEqual([frame]);
+    // Frames don't turn.
+    expect(t.interaction.frame()).toMatchObject({ kind: "box", rotatable: false });
+
+    // Narrowed by its right edge, the frame lets go of b, and a isn't written.
+    const storedA = t.doc.get(a);
+    t.drag({ x: 400, y: 100 }, { x: 200, y: 100 });
+    expect(t.doc.get(frame)).toMatchObject({ x: 0, w: 200 });
+    expect(t.doc.get(a)).toBe(storedA);
+    expect(t.doc.get(b)?.parentId).toBeNull();
+
+    // Widened by its left edge, it moves its corner, and a stays where it is.
+    t.drag({ x: 0, y: 100 }, { x: -100, y: 100 });
+    expect(t.doc.get(frame)).toMatchObject({ x: -100, w: 300 });
+    expect(t.scene.get(a)).toMatchObject({ x: 20, y: 20 });
+    expect(t.doc.get(a)).toMatchObject({ parentId: frame, x: 120, y: 20 });
+  });
+
+  it("puts shapes drawn in a frame into it, unless they're drawn out of it", () => {
+    const t = setup();
+    t.setTool("frame");
+    t.drag({ x: 0, y: 0 }, { x: 400, y: 400 });
+    const [frame] = ofType(t, "frame") as [ShapeId];
+    t.setTool("ellipse");
+    t.drag({ x: 100, y: 100 }, { x: 200, y: 200 });
+    t.setTool("line");
+    t.drag({ x: 50, y: 300 }, { x: 600, y: 300 });
+    t.setTool("pen");
+    t.drag({ x: 300, y: 50 }, { x: 350, y: 80 });
+    const [ellipse] = ofType(t, "ellipse") as [ShapeId];
+    const [line] = ofType(t, "line") as [ShapeId];
+    const [stroke] = ofType(t, "freehand") as [ShapeId];
+    expect(t.doc.get(ellipse)?.parentId).toBe(frame);
+    expect(t.doc.get(line)?.parentId).toBeNull();
+    expect(t.doc.get(stroke)?.parentId).toBe(frame);
   });
 });

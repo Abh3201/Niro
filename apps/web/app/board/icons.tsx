@@ -69,6 +69,12 @@ export const PenIcon = () => (
   </Icon>
 );
 
+export const FrameIcon = () => (
+  <Icon>
+    <path d="M6.5 3v14M13.5 3v14M3 6.5h14M3 13.5h14" />
+  </Icon>
+);
+
 export const TextIcon = () => (
   <Icon>
     <path d="M4.5 5V3.5h11V5M10 3.5v13M7.5 16.5h5" />
@@ -125,5 +131,20 @@ export const SendToBackIcon = () => (
   <Icon>
     <path d="M10 4v12M5.5 11.5L10 16l4.5-4.5" />
     <path d="M4 3h12" />
+  </Icon>
+);
+
+export const GroupIcon = () => (
+  <Icon>
+    <path d="M3 5.5V3h2.5M14.5 3H17v2.5M17 14.5V17h-2.5M5.5 17H3v-2.5" />
+    <rect x="6" y="6" width="5" height="5" rx="1" />
+    <rect x="9" y="9" width="5" height="5" rx="1" />
+  </Icon>
+);
+
+export const UngroupIcon = () => (
+  <Icon>
+    <rect x="3" y="3" width="6" height="6" rx="1" />
+    <rect x="11" y="11" width="6" height="6" rx="1" />
   </Icon>
 );

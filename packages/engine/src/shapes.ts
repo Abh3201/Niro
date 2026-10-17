@@ -8,6 +8,7 @@ import {
   polygonIntersectsBox,
   rotateAround,
 } from "./geometry";
+import { FRAME_LABEL_HEIGHT } from "./text";
 
 /** Geometry of shapes in world coordinates. See `Shape` for what x, y, w, h mean per type. */
 
@@ -51,6 +52,8 @@ export function toShapeFrame(shape: Shape, p: Point): Point {
  * so thin lines and edges stay easy to hit at any zoom.
  */
 export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
+  // A group is picked through what's in it.
+  if (shape.type === "group") return false;
   if (isLinear(shape.type)) {
     const [a, b] = lineEnds(shape);
     return distanceToSegment(p, a, b) <= tolerance;
@@ -60,6 +63,16 @@ export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
   const ry = shape.h / 2 + tolerance;
   if (shape.type === "ellipse") return (local.x / rx) ** 2 + (local.y / ry) ** 2 <= 1;
   const inBox = Math.abs(local.x) <= rx && Math.abs(local.y) <= ry;
+  // A frame is picked by its name or its edge: inside, a press is on the board
+  // (or on what's in the frame), so a marquee can start there.
+  if (shape.type === "frame") {
+    const hw = shape.w / 2;
+    const hh = shape.h / 2;
+    const onLabel =
+      Math.abs(local.x) <= hw && local.y >= -hh - FRAME_LABEL_HEIGHT && local.y <= -hh;
+    const inside = Math.abs(local.x) < hw - tolerance && Math.abs(local.y) < hh - tolerance;
+    return onLabel || (inBox && !inside);
+  }
   // A stroke is hit on its ink, not anywhere in its box.
   if (shape.type === "freehand") return inBox && hitStroke(shape, local, tolerance);
   return inBox;

@@ -111,6 +111,19 @@ describe("readShape: strokes and arrows", () => {
   });
 });
 
+describe("readShape: groups and frames", () => {
+  it("keeps them upright, and gives a frame its name but a group no text", () => {
+    expect(readShape("f1", { ...valid, type: "frame", rotation: 1, text: "Plan" })).toMatchObject({
+      rotation: 0,
+      text: "Plan",
+    });
+    expect(readShape("g1", { ...valid, type: "group", rotation: 1, text: "x" })).toMatchObject({
+      rotation: 0,
+      text: "",
+    });
+  });
+});
+
 describe("normalizeAngle", () => {
   it("wraps into [0, 2π)", () => {
     expect(normalizeAngle(-Math.PI / 2)).toBeCloseTo((3 * Math.PI) / 2);

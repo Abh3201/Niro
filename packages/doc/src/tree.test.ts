@@ -4,6 +4,7 @@ import { effectiveParents } from "./tree";
 
 interface Node {
   id: string;
+  type: "group";
   parentId: string | null;
 }
 
@@ -15,7 +16,11 @@ const graphs = fc.integer({ min: 1, max: 12 }).chain((n) =>
       maxLength: n,
     })
     .map((parents): Node[] =>
-      parents.map((p, i) => ({ id: `n${i}`, parentId: p === null ? null : `n${p}` })),
+      parents.map((p, i) => ({
+        id: `n${i}`,
+        type: "group" as const,
+        parentId: p === null ? null : `n${p}`,
+      })),
     ),
 );
 
@@ -33,8 +38,8 @@ function isAcyclic(parent: Map<string, string | null>): boolean {
 describe("effectiveParents", () => {
   it("breaks the two-shape cycle from concurrent reparenting at the smaller id", () => {
     const result = effectiveParents([
-      { id: "A", parentId: "B" },
-      { id: "B", parentId: "A" },
+      { id: "A", type: "group", parentId: "B" },
+      { id: "B", type: "frame", parentId: "A" },
     ]);
     expect(result).toEqual(
       new Map([
@@ -45,7 +50,18 @@ describe("effectiveParents", () => {
   });
 
   it("makes shapes with a missing parent top level", () => {
-    expect(effectiveParents([{ id: "A", parentId: "gone" }]).get("A")).toBeNull();
+    expect(effectiveParents([{ id: "A", type: "group", parentId: "gone" }]).get("A")).toBeNull();
+  });
+
+  it("only lets groups and frames hold shapes", () => {
+    const result = effectiveParents([
+      { id: "box", type: "rectangle", parentId: null },
+      { id: "in-box", type: "ellipse", parentId: "box" },
+      { id: "frame", type: "frame", parentId: null },
+      { id: "in-frame", type: "sticky", parentId: "frame" },
+    ]);
+    expect(result.get("in-box")).toBeNull();
+    expect(result.get("in-frame")).toBe("frame");
   });
 
   it("always returns a forest", () => {

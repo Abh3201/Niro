@@ -44,6 +44,16 @@ export function indexesAbove(ordered: readonly Ordered[], n: number): string[] {
   return generateNKeysBetween(ordered.at(-1)?.index ?? null, null, n);
 }
 
+/**
+ * `n` increasing keys between `below` and `above` (either may be null, for
+ * no bound). Tied or crossed bounds, from concurrent edits, drop the upper
+ * one: the keys still sort above `below`.
+ */
+export function indexesBetween(below: string | null, above: string | null, n: number): string[] {
+  const upper = below !== null && above !== null && above <= below ? null : above;
+  return generateNKeysBetween(below, upper, n);
+}
+
 /** `n` increasing keys below every shape. */
 export function indexesBelow(ordered: readonly Ordered[], n: number): string[] {
   return generateNKeysBetween(null, ordered[0]?.index ?? null, n);

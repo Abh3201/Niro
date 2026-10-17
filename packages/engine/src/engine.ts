@@ -3,15 +3,12 @@ import {
   DEFAULT_COLOR,
   type DocStore,
   holdsText,
-  indexesAbove,
   isLinear,
-  newShapeId,
-  reorderStep,
-  reorderToEnd,
   type Shape,
   type ShapeId,
 } from "@niro/doc";
 import { asDrawn, detachUnless } from "./arrows";
+import { transact } from "./board-tx";
 import {
   type Camera,
   centerOn,
@@ -29,8 +26,21 @@ import { Layer } from "./layers";
 import { type RemotePeer, SmoothedCursors } from "./presence";
 import { DARK_PALETTE, drawShape, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
-import { HANDLE_SIZE, placeHandles, type SelectionFrame, selectionFrame } from "./selection";
+import { HANDLE_SIZE, placeHandles } from "./selection";
 import { shapeCenter, shapeOutline } from "./shapes";
+import {
+  duplicate,
+  group,
+  movers,
+  outermost,
+  remove,
+  reorder,
+  reparentOnMove,
+  sharedColor,
+  styleTargets,
+  ungroup,
+  withDescendants,
+} from "./structure";
 import { canvasFontMetrics, TextLayouts } from "./text";
 import { TextEditor } from "./text-editor";
 import { translate } from "./transform";
@@ -43,8 +53,15 @@ export interface EngineState {
   readonly tool: ToolName;
   /** Selected shape ids. Local to this user: selection never goes into the document. */
   readonly selection: readonly ShapeId[];
-  /** The color every selected shape shares, or null when mixed or nothing is selected. */
+  /**
+   * The color every selected shape shares (for a group, every shape in it),
+   * or null when mixed or nothing is selected.
+   */
   readonly selectionColor: ColorName | null;
+  /** Two or more shapes are selected, so they can be grouped. */
+  readonly canGroup: boolean;
+  /** A group is selected, so it can be taken apart. */
+  readonly canUngroup: boolean;
   readonly shapeCount: number;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -88,6 +105,10 @@ export interface Engine {
   duplicateSelection(): void;
   setSelectionColor(color: ColorName): void;
   reorderSelection(direction: ReorderDirection): void;
+  /** Puts the selected shapes in a group, and selects it. */
+  groupSelection(): void;
+  /** Takes the selected groups apart, and selects what was in them. */
+  ungroupSelection(): void;
   /** Starts editing a shape's text, in place. Lines have none. */
   editText(id: ShapeId): void;
   /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
@@ -112,6 +133,8 @@ const FRAME_MS = 1000 / 60;
 const CURSOR_SETTLE_PX = 0.25;
 /** Longest remote name drawn on a cursor label. */
 const MAX_LABEL_CHARS = 24;
+/** Shown in place of a frame's name until it has one. */
+const FRAME_PLACEHOLDER = "Frame";
 /** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
 const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
@@ -129,6 +152,7 @@ const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
   a: "arrow",
   t: "text",
   p: "pen",
+  f: "frame",
 };
 
 /**
@@ -158,6 +182,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     tool: "select",
     selection: [],
     selectionColor: null,
+    canGroup: false,
+    canUngroup: false,
     shapeCount: scene.size,
     canUndo: doc.canUndo(),
     canRedo: doc.canRedo(),
@@ -213,22 +239,18 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     reportPointer();
   };
 
-  const selectionColorOf = (ids: readonly ShapeId[]): ColorName | null => {
-    let color: ColorName | null = null;
-    for (const id of ids) {
-      const shape = scene.get(id);
-      if (!shape) continue;
-      if (color !== null && shape.color !== color) return null;
-      color = shape.color;
-    }
-    return color;
-  };
+  /** What the panel shows about a selection. */
+  const describe = (ids: readonly ShapeId[]) => ({
+    selectionColor: sharedColor(scene, ids),
+    canGroup: outermost(scene, ids).length >= 2,
+    canUngroup: ids.some((id) => scene.get(id)?.type === "group"),
+  });
 
   const setSelection = (ids: readonly ShapeId[]) => {
     const next = [...new Set(ids)].filter((id) => scene.has(id));
     const current = state.selection;
     if (next.length === current.length && next.every((id, i) => id === current[i])) return;
-    setState({ ...state, selection: next, selectionColor: selectionColorOf(next) });
+    setState({ ...state, selection: next, ...describe(next) });
     markDirty(overlay);
   };
 
@@ -241,6 +263,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const editor = new TextEditor({
     container,
     doc,
+    shape: (id) => scene.get(id),
+    transact: (fn) => transact(doc, scene, fn),
     layouts,
     camera: () => state.camera,
     palette: () => theme.palette,
@@ -263,7 +287,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setState({
       ...state,
       selection: selection.length === state.selection.length ? state.selection : selection,
-      selectionColor: selectionColorOf(selection),
+      ...describe(selection),
       shapeCount: scene.size,
       canUndo: doc.canUndo(),
       canRedo: doc.canRedo(),
@@ -281,6 +305,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const host: EditorHost = {
     doc,
     scene,
+    transact: (fn) => transact(doc, scene, fn),
     camera: () => state.camera,
     tool: () => state.tool,
     setTool: (tool) => setTool(tool),
@@ -327,15 +352,38 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       const scale = pr * camera.zoom;
       ctx.setTransform(scale, 0, 0, scale, -camera.x * scale, -camera.y * scale);
       const editing = editor.editing;
+      // Shapes in frames are cut off at each frame's edges. Shapes in the
+      // same frames share one list, so the clip changes only between frames.
+      let clipped: readonly ShapeId[] = [];
       for (const shape of scene.ordered()) {
+        const frames = scene.framesAround(shape.id);
+        if (frames !== clipped) {
+          if (clipped.length > 0) ctx.restore();
+          if (frames.length > 0) {
+            ctx.save();
+            for (const id of frames) {
+              const frame = scene.get(id);
+              if (!frame) continue;
+              ctx.beginPath();
+              ctx.rect(frame.x, frame.y, frame.w, frame.h);
+              ctx.clip();
+            }
+          }
+          clipped = frames;
+        }
+        const labelled =
+          shape.type === "frame" && shape.text === ""
+            ? { ...shape, text: FRAME_PLACEHOLDER }
+            : shape;
         // The editor shows the text of the shape being edited.
         const text =
-          shape.text === "" || shape.id === editing
+          labelled.text === "" || shape.id === editing
             ? undefined
-            : { layout: layouts.get(shape), baseline: fonts.baseline, zoom: camera.zoom };
+            : { layout: layouts.get(labelled), baseline: fonts.baseline, zoom: camera.zoom };
         const stroke = shape.type === "freehand" ? strokes.get(shape) : undefined;
         drawShape(ctx, shape, theme.palette, { ...(text && { text }), ...(stroke && { stroke }) });
       }
+      if (clipped.length > 0) ctx.restore();
       shapes.dirty = false;
       // Shapes or the camera moved: the editor moves with them.
       editor.update();
@@ -406,16 +454,20 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     }
 
     ctx.strokeStyle = accent;
+    // Nothing in the selection gets a hover outline, including what's in a selected group.
     const hovered = interaction.hovered();
-    const hoveredShape =
-      hovered && !state.selection.includes(hovered) ? scene.get(hovered) : undefined;
+    const inSelection = (id: ShapeId) =>
+      state.selection.includes(id) ||
+      scene.ancestorsOf(id).some((a) => state.selection.includes(a));
+    const hoveredShape = hovered && !inSelection(hovered) ? scene.get(hovered) : undefined;
     if (hoveredShape) outlineShape(hoveredShape);
 
     const selected = selectedShapes();
     for (const shape of selected) outlineShape(shape);
 
-    const frame: SelectionFrame | null = selectionFrame(selected);
-    if (frame?.kind === "group") {
+    const frame = interaction.frame();
+    // Several shapes get a dashed box around them all; a group has its own outline.
+    if (frame?.kind === "group" && selected.length > 1) {
       const b = frame.bounds;
       ctx.setLineDash([4, 4]);
       outline(
@@ -526,7 +578,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const command = (fn: Parameters<DocStore["transact"]>[0]) => {
     if (doc.readOnly) return;
     doc.checkpoint();
-    doc.transact(fn);
+    transact(doc, scene, fn);
     doc.checkpoint();
   };
 
@@ -544,63 +596,50 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const deleteSelection = () => {
     const ids = state.selection;
     if (ids.length === 0) return;
-    const deleted = new Set<ShapeId>(ids);
-    // Arrows attached to deleted shapes stay where they are drawn now, rather
-    // than jumping back to where their ends were last stored.
-    const arrows = new Set<ShapeId>();
-    for (const id of ids)
-      for (const arrow of scene.arrowsAttachedTo(id)) if (!deleted.has(arrow)) arrows.add(arrow);
-    command((tx) => {
-      for (const id of arrows) {
-        const arrow = scene.get(id);
-        if (arrow)
-          tx.update(id, {
-            ...asDrawn(arrow),
-            ...detachUnless(arrow, (target) => !deleted.has(target)),
-          });
-      }
-      for (const id of ids) tx.remove(id);
-    });
+    command((tx) => remove(scene, tx, ids));
   };
 
   const duplicateSelection = () => {
-    const originals = selectedShapes();
-    if (originals.length === 0 || doc.readOnly) return;
-    const keys = indexesAbove(scene.ordered(), originals.length);
-    const ids = new Map(originals.map((shape) => [shape.id, newShapeId()]));
-    const copies = originals.map((shape, i) => ({
-      ...shape,
-      ...translate(shape, DUPLICATE_OFFSET, DUPLICATE_OFFSET),
-      id: ids.get(shape.id) as ShapeId,
-      index: keys[i] as string,
-      // A copied arrow attaches to copies of its shapes, or to nothing.
-      from: shape.from === null ? null : (ids.get(shape.from) ?? null),
-      to: shape.to === null ? null : (ids.get(shape.to) ?? null),
-    }));
+    const ids = state.selection;
+    if (ids.length === 0 || doc.readOnly) return;
+    let copies: ShapeId[] = [];
     command((tx) => {
-      for (const copy of copies) tx.add(copy);
+      copies = duplicate(scene, tx, ids, DUPLICATE_OFFSET);
     });
-    setSelection(copies.map((c) => c.id));
+    setSelection(copies);
   };
 
   const setSelectionColor = (color: ColorName) => {
-    const ids = state.selection;
+    const ids = styleTargets(scene, state.selection);
     command((tx) => {
       for (const id of ids) tx.update(id, { color });
     });
   };
 
   const reorderSelection = (direction: ReorderDirection) => {
-    const selected = new Set<string>(state.selection);
-    if (selected.size === 0) return;
-    const ordered = scene.ordered();
-    const keys =
-      direction === "forward" || direction === "backward"
-        ? reorderStep(ordered, selected, direction === "forward" ? 1 : -1)
-        : reorderToEnd(ordered, selected, direction === "front" ? 1 : -1);
+    if (state.selection.length === 0) return;
+    const keys = reorder(scene, state.selection, direction);
     command((tx) => {
-      for (const [id, index] of keys) tx.update(id as ShapeId, { index });
+      for (const [id, index] of keys) tx.update(id, { index });
     });
+  };
+
+  const groupSelection = () => {
+    if (!state.canGroup || doc.readOnly) return;
+    let id: ShapeId | null = null;
+    command((tx) => {
+      id = group(scene, tx, state.selection);
+    });
+    if (id !== null) setSelection([id]);
+  };
+
+  const ungroupSelection = () => {
+    if (!state.canUngroup || doc.readOnly) return;
+    let freed: ShapeId[] = [];
+    command((tx) => {
+      freed = ungroup(scene, tx, state.selection);
+    });
+    setSelection(freed);
   };
 
   function editText(id: ShapeId) {
@@ -611,17 +650,24 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   }
 
   const nudge = (dx: number, dy: number) => {
-    const before = selectedShapes();
-    if (before.length === 0 || doc.readOnly) return;
-    const moving = new Set<ShapeId>(before.map((shape) => shape.id));
+    const units = outermost(scene, state.selection)
+      .map((id) => scene.get(id))
+      .filter((s): s is Shape => s !== undefined);
+    if (units.length === 0 || doc.readOnly) return;
+    const moving = new Set(withDescendants(scene, state.selection));
+    const membership = reparentOnMove(scene, units, moving, dx, dy);
     // Consecutive nudges merge into one undo step, like a drag.
-    doc.transact((tx) => {
-      for (const shape of before)
-        tx.update(shape.id, {
+    transact(doc, scene, (tx) => {
+      for (const id of movers(scene, state.selection)) {
+        const shape = scene.get(id);
+        if (!shape) continue;
+        tx.update(id, {
           ...asDrawn(shape),
           ...translate(shape, dx, dy),
-          ...detachUnless(shape, (id) => moving.has(id)),
+          ...detachUnless(shape, (target) => moving.has(target)),
         });
+      }
+      for (const [id, patch] of membership) tx.update(id, patch);
     });
   };
 
@@ -657,6 +703,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       else if (key === "y") redo();
       else if (key === "a") selectAll();
       else if (key === "d") duplicateSelection();
+      else if (key === "g") event.shiftKey ? ungroupSelection() : groupSelection();
       else return false;
       return true;
     }
@@ -701,7 +748,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     return false;
   };
 
-  const selectAll = () => setSelection(scene.ordered().map((s) => s.id));
+  /** Everything at the top level: what's in groups and frames comes with them. */
+  const selectAll = () => setSelection(scene.childrenOf(null));
 
   // ResizeObserver doesn't fire when the window moves to a screen with a different
   // pixel ratio, so watch the ratio itself too.
@@ -763,6 +811,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     duplicateSelection,
     setSelectionColor,
     reorderSelection,
+    groupSelection,
+    ungroupSelection,
     editText,
     setPeers,
     undo,

@@ -18,3 +18,4 @@ Milestone notes, on how the real thing works:
 - [How multiplayer works in Niro](multiplayer.md): the two-step sync, presence, cursor smoothing, backpressure, dead connections, how boards are stored, the limits, and how it's tested (P3a, P3b).
 - [How text works in Niro](text.md): line breaking on a canvas, fitting text to a shape, editing in a textarea over the canvas, and keeping two people's typing apart in one sticky note (P4a).
 - [How the pen and arrows work in Niro](pen-and-arrows.md): catching every point of a fast pen, strokes as filled outlines, storing points cheaply in a CRDT, and why arrow ends are worked out rather than stored (P4b).
+- [How groups and frames work in Niro](groups-and-frames.md): the shape tree, clipping on a canvas, what a click selects, joining and leaving frames, and why a shape in a frame stores where it is in the frame (P4c).

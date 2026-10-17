@@ -382,8 +382,8 @@ describe("YDocStore", () => {
     expect(store.get(id("a1"))?.from).toBeNull();
   });
 
-  it("opens a board with strokes and arrows read-only in a version from before them", () => {
-    expect(SCHEMA_VERSION).toBe(3);
+  it("opens a board from a newer version read-only, whatever this version is", () => {
+    expect(SCHEMA_VERSION).toBe(4);
     const doc = new Y.Doc();
     doc.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
     expect(createYDocStore(doc).readOnly).toBe(true);

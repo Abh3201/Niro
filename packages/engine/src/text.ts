@@ -17,6 +17,12 @@ export const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-s
 export const LINE_HEIGHT = 1.25;
 /** Font size of text shapes, in world units. */
 export const TEXT_FONT_SIZE = 24;
+/** Font size of a frame's name, written above its top-left corner, in world units. */
+export const FRAME_LABEL_SIZE = 14;
+/** Space between a frame's name and its top edge, in world units. */
+export const FRAME_LABEL_GAP = 6;
+/** Height of the strip above a frame where its name's last line is: where a click picks the frame. */
+export const FRAME_LABEL_HEIGHT = FRAME_LABEL_SIZE * LINE_HEIGHT + FRAME_LABEL_GAP;
 /** Width a text shape gets when it's created with a click. */
 export const DEFAULT_TEXT_WIDTH = 240;
 /** Most characters the editor takes in one shape: a board is for notes, not novels. */
@@ -118,6 +124,19 @@ const FIT_STEPS = 12;
  */
 export function layoutText(shape: Shape, measure: MeasureText): TextLayout {
   const { w, h, text } = shape;
+  if (shape.type === "frame") {
+    // A frame's name sits above it, growing upward if it wraps.
+    const lines = wrapText(text, w, FRAME_LABEL_SIZE, measure);
+    return {
+      fontSize: FRAME_LABEL_SIZE,
+      lines,
+      widths: lineWidths(lines, FRAME_LABEL_SIZE, measure),
+      align: "left",
+      x: -w / 2,
+      y: -h / 2 - FRAME_LABEL_GAP - textHeight(lines.length, FRAME_LABEL_SIZE),
+      width: w,
+    };
+  }
   if (shape.type === "text") {
     const lines = wrapText(text, w, TEXT_FONT_SIZE, measure);
     return {
@@ -187,6 +206,7 @@ export function withHeight(shape: Shape, h: number): ShapePatch | null {
 /** Color of a shape's text: dark or white on solid fills, whichever stands out more. */
 export function inkColor(shape: Shape, palette: Palette): string {
   if (shape.type === "sticky") return STICKY_INK;
+  if (shape.type === "frame") return palette.frame.label;
   if (shape.type === "text") return palette.solid[shape.color];
   const fill = palette.solid[shape.color];
   return contrast(fill, STICKY_INK) >= contrast(fill, LIGHT_INK) ? STICKY_INK : LIGHT_INK;
