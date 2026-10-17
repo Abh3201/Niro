@@ -1,14 +1,17 @@
 import {
   type ColorName,
+  DEFAULT_COLOR,
   type DocStore,
   holdsText,
   indexesAbove,
+  isLinear,
   newShapeId,
   reorderStep,
   reorderToEnd,
   type Shape,
   type ShapeId,
 } from "@niro/doc";
+import { asDrawn, detachUnless } from "./arrows";
 import {
   type Camera,
   centerOn,
@@ -17,6 +20,7 @@ import {
   worldToScreen,
   zoomAt,
 } from "./camera";
+import { StrokePaths, strokeOutline, traceOutline } from "./freehand";
 import type { Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
 import { InputController } from "./input";
@@ -122,7 +126,9 @@ const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
   o: "ellipse",
   n: "sticky",
   l: "line",
+  a: "arrow",
   t: "text",
+  p: "pen",
 };
 
 /**
@@ -231,6 +237,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const fonts = canvasFontMetrics();
   const layouts = new TextLayouts(fonts.measure);
+  const strokes = new StrokePaths();
   const editor = new TextEditor({
     container,
     doc,
@@ -326,7 +333,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
           shape.text === "" || shape.id === editing
             ? undefined
             : { layout: layouts.get(shape), baseline: fonts.baseline, zoom: camera.zoom };
-        drawShape(ctx, shape, theme.palette, text);
+        const stroke = shape.type === "freehand" ? strokes.get(shape) : undefined;
+        drawShape(ctx, shape, theme.palette, { ...(text && { text }), ...(stroke && { stroke }) });
       }
       shapes.dirty = false;
       // Shapes or the camera moved: the editor moves with them.
@@ -370,7 +378,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     };
     const outlineShape = (shape: Shape) => {
       if (shape.type !== "ellipse") {
-        outline(shapeOutline(shape), shape.type !== "line");
+        outline(shapeOutline(shape), !isLinear(shape.type));
         return;
       }
       const c = toScreen(shapeCenter(shape));
@@ -434,6 +442,34 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         ctx.fill();
         ctx.stroke();
       }
+    }
+
+    // The shape an arrow end being dragged would attach to.
+    const target = interaction.attachTarget();
+    const targetShape = target === null ? undefined : scene.get(target);
+    if (targetShape) {
+      ctx.lineWidth = 3;
+      outlineShape(targetShape);
+      ctx.lineWidth = 1.5;
+    }
+
+    // A pen stroke being drawn: in the overlay until it's finished.
+    const drawing = interaction.drawing();
+    if (drawing) {
+      ctx.save();
+      ctx.setTransform(
+        pixelRatio * camera.zoom,
+        0,
+        0,
+        pixelRatio * camera.zoom,
+        -camera.x * camera.zoom * pixelRatio,
+        -camera.y * camera.zoom * pixelRatio,
+      );
+      ctx.beginPath();
+      traceOutline(ctx, strokeOutline(drawing, false));
+      ctx.fillStyle = theme.palette.solid[DEFAULT_COLOR.freehand];
+      ctx.fill();
+      ctx.restore();
     }
 
     const marquee = interaction.marquee();
@@ -508,7 +544,21 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const deleteSelection = () => {
     const ids = state.selection;
     if (ids.length === 0) return;
+    const deleted = new Set<ShapeId>(ids);
+    // Arrows attached to deleted shapes stay where they are drawn now, rather
+    // than jumping back to where their ends were last stored.
+    const arrows = new Set<ShapeId>();
+    for (const id of ids)
+      for (const arrow of scene.arrowsAttachedTo(id)) if (!deleted.has(arrow)) arrows.add(arrow);
     command((tx) => {
+      for (const id of arrows) {
+        const arrow = scene.get(id);
+        if (arrow)
+          tx.update(id, {
+            ...asDrawn(arrow),
+            ...detachUnless(arrow, (target) => !deleted.has(target)),
+          });
+      }
       for (const id of ids) tx.remove(id);
     });
   };
@@ -517,11 +567,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     const originals = selectedShapes();
     if (originals.length === 0 || doc.readOnly) return;
     const keys = indexesAbove(scene.ordered(), originals.length);
+    const ids = new Map(originals.map((shape) => [shape.id, newShapeId()]));
     const copies = originals.map((shape, i) => ({
       ...shape,
       ...translate(shape, DUPLICATE_OFFSET, DUPLICATE_OFFSET),
-      id: newShapeId(),
+      id: ids.get(shape.id) as ShapeId,
       index: keys[i] as string,
+      // A copied arrow attaches to copies of its shapes, or to nothing.
+      from: shape.from === null ? null : (ids.get(shape.from) ?? null),
+      to: shape.to === null ? null : (ids.get(shape.to) ?? null),
     }));
     command((tx) => {
       for (const copy of copies) tx.add(copy);
@@ -559,9 +613,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const nudge = (dx: number, dy: number) => {
     const before = selectedShapes();
     if (before.length === 0 || doc.readOnly) return;
+    const moving = new Set<ShapeId>(before.map((shape) => shape.id));
     // Consecutive nudges merge into one undo step, like a drag.
     doc.transact((tx) => {
-      for (const shape of before) tx.update(shape.id, translate(shape, dx, dy));
+      for (const shape of before)
+        tx.update(shape.id, {
+          ...asDrawn(shape),
+          ...translate(shape, dx, dy),
+          ...detachUnless(shape, (id) => moving.has(id)),
+        });
     });
   };
 

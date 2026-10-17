@@ -1,4 +1,5 @@
-import type { Shape } from "@niro/doc";
+import { isLinear, type Shape } from "@niro/doc";
+import { hitStroke } from "./freehand";
 import {
   type Box,
   boxFromPoints,
@@ -21,9 +22,9 @@ export function lineEnds(shape: Shape): [Point, Point] {
   ];
 }
 
-/** Corners of a box shape after rotation, clockwise from the top-left; a line's two ends. */
+/** Corners of a box shape after rotation, clockwise from the top-left; a line's or arrow's two ends. */
 export function shapeOutline(shape: Shape): Point[] {
-  if (shape.type === "line") return lineEnds(shape);
+  if (isLinear(shape.type)) return lineEnds(shape);
   const { x, y, w, h, rotation } = shape;
   const center = shapeCenter(shape);
   return [
@@ -50,7 +51,7 @@ export function toShapeFrame(shape: Shape, p: Point): Point {
  * so thin lines and edges stay easy to hit at any zoom.
  */
 export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
-  if (shape.type === "line") {
+  if (isLinear(shape.type)) {
     const [a, b] = lineEnds(shape);
     return distanceToSegment(p, a, b) <= tolerance;
   }
@@ -58,7 +59,10 @@ export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
   const rx = shape.w / 2 + tolerance;
   const ry = shape.h / 2 + tolerance;
   if (shape.type === "ellipse") return (local.x / rx) ** 2 + (local.y / ry) ** 2 <= 1;
-  return Math.abs(local.x) <= rx && Math.abs(local.y) <= ry;
+  const inBox = Math.abs(local.x) <= rx && Math.abs(local.y) <= ry;
+  // A stroke is hit on its ink, not anywhere in its box.
+  if (shape.type === "freehand") return inBox && hitStroke(shape, local, tolerance);
+  return inBox;
 }
 
 /**

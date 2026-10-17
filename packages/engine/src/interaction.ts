@@ -3,13 +3,16 @@ import {
   type DocStore,
   holdsText,
   indexAbove,
+  isLinear,
   newShapeId,
   type Shape,
   type ShapeId,
   type ShapePatch,
   type ShapeType,
 } from "@niro/doc";
+import { asDrawn, canAttachTo, detachUnless } from "./arrows";
 import type { Camera } from "./camera";
+import { type PenPoint, strokeShape } from "./freehand";
 import { type Box, boxFromPoints, distance, type Point } from "./geometry";
 import type { Scene } from "./scene";
 import {
@@ -34,7 +37,19 @@ import {
   translate,
 } from "./transform";
 
-export type ToolName = "select" | "hand" | "rectangle" | "ellipse" | "sticky" | "line" | "text";
+export type ToolName =
+  | "select"
+  | "hand"
+  | "rectangle"
+  | "ellipse"
+  | "sticky"
+  | "line"
+  | "arrow"
+  | "text"
+  | "pen";
+
+/** The tools that drag out a shape of their own type. */
+type ShapeTool = "rectangle" | "ellipse" | "sticky" | "line" | "arrow";
 
 export interface ToolPointer {
   readonly pointerId: number;
@@ -43,6 +58,14 @@ export interface ToolPointer {
   readonly screen: Point;
   readonly world: Point;
   readonly shiftKey: boolean;
+  /** Pen pressure from 0 to 1; 0.5 for anything that can't sense it. */
+  readonly pressure: number;
+  /**
+   * Where the pointer was in between, for a move: browsers merge the
+   * movements of a fast pointer into one event per frame, and a pen
+   * stroke wants them all. Oldest first, ending with this one.
+   */
+  readonly samples?: readonly PenPoint[];
 }
 
 /** What gestures need from the engine. */
@@ -73,12 +96,13 @@ const HIT_TOLERANCE = 4;
 /** How far a pointer must travel before a press becomes a drag, in CSS pixels. */
 const DRAG_THRESHOLD = { mouse: 3, touch: 8 };
 
-const DEFAULT_SIZE: Record<Exclude<ShapeType, "line">, { w: number; h: number }> = {
-  rectangle: { w: 160, h: 120 },
-  ellipse: { w: 140, h: 140 },
-  sticky: { w: 200, h: 200 },
-  text: { w: DEFAULT_TEXT_WIDTH, h: textHeight(1, TEXT_FONT_SIZE) },
-};
+const DEFAULT_SIZE: Record<"rectangle" | "ellipse" | "sticky" | "text", { w: number; h: number }> =
+  {
+    rectangle: { w: 160, h: 120 },
+    ellipse: { w: 140, h: 140 },
+    sticky: { w: 200, h: 200 },
+    text: { w: DEFAULT_TEXT_WIDTH, h: textHeight(1, TEXT_FONT_SIZE) },
+  };
 /** Narrowest text shape a drag with the text tool makes, in world units. */
 const MIN_TEXT_WIDTH = 40;
 const DEFAULT_LINE_LENGTH = 160;
@@ -103,8 +127,25 @@ type Gesture =
       before: Map<ShapeId, Shape>;
     }
   | { kind: "rotate"; start: ToolPointer; pivot: Point; before: Map<ShapeId, Shape> }
-  | { kind: "line-end"; start: ToolPointer; end: "start" | "end"; before: Shape }
-  | { kind: "create"; start: ToolPointer; type: ShapeType; id: ShapeId | null }
+  /** Dragging a line's or arrow's end; `target` is the shape an arrow's end would attach to. */
+  | {
+      kind: "line-end";
+      start: ToolPointer;
+      end: "start" | "end";
+      before: Shape;
+      target: ShapeId | null;
+    }
+  /** Dragging out a shape. An arrow starts attached to `from` and ends attached to `target`. */
+  | {
+      kind: "create";
+      start: ToolPointer;
+      type: ShapeTool;
+      id: ShapeId | null;
+      from: ShapeId | null;
+      target: ShapeId | null;
+    }
+  /** A pen stroke, drawn in the overlay until it's finished. */
+  | { kind: "draw"; points: PenPoint[] }
   /** The text tool: a click places a text shape, a drag sets its width. `onto` is a text shape clicked to edit it. */
   | {
       kind: "text";
@@ -139,6 +180,17 @@ export class Interaction {
     return this.gesture.kind === "idle" ? this.hoveredId : null;
   }
 
+  /** The pen stroke being drawn, in world coordinates. */
+  drawing(): readonly PenPoint[] | null {
+    return this.gesture.kind === "draw" ? this.gesture.points : null;
+  }
+
+  /** The shape the arrow end being dragged would attach to. */
+  attachTarget(): ShapeId | null {
+    const g = this.gesture;
+    return g.kind === "create" || g.kind === "line-end" ? g.target : null;
+  }
+
   /** True while a gesture that writes to the document is running. */
   busy(): boolean {
     return this.gesture.kind !== "idle" && this.gesture.kind !== "pending";
@@ -166,9 +218,17 @@ export class Interaction {
       this.gesture = { kind: "text", start: p, current: p, dragged: false, onto };
       return true;
     }
+    if (tool === "pen") {
+      // Each stroke is its own undo step, however quickly the next follows.
+      this.host.doc.checkpoint();
+      this.gesture = { kind: "draw", points: [penPoint(p)] };
+      this.host.overlayChanged();
+      return true;
+    }
     if (tool !== "select") {
       this.host.doc.checkpoint();
-      this.gesture = { kind: "create", start: p, type: tool, id: null };
+      const from = tool === "arrow" ? this.attachableAt(p, []) : null;
+      this.gesture = { kind: "create", start: p, type: tool, id: null, from, target: null };
       return true;
     }
     return this.selectDown(p);
@@ -180,6 +240,11 @@ export class Interaction {
       g.current = p;
       g.dragged ||= distance(p.screen, g.start.screen) >= dragThreshold(p);
       if (g.dragged) this.host.overlayChanged();
+      return;
+    }
+    if (g.kind === "draw") {
+      g.points.push(...(p.samples ?? [penPoint(p)]));
+      this.host.overlayChanged();
       return;
     }
     if (g.kind === "pending") {
@@ -205,6 +270,7 @@ export class Interaction {
     if (g.kind === "pending") g.onClick?.();
     if (g.kind === "create") this.finishCreate(g, p);
     if (g.kind === "text") this.finishText(g, p);
+    if (g.kind === "draw") this.finishDraw(g);
     this.host.flushWrite();
     this.hover(p);
   }
@@ -221,6 +287,7 @@ export class Interaction {
       this.host.scheduleWrite(() => this.host.doc.transact((tx) => tx.remove(id)));
     }
     if (g.kind === "marquee") this.host.setSelection(g.base);
+    // A cancelled pen stroke was only ever in the overlay.
     this.host.flushWrite();
     this.host.overlayChanged();
     return true;
@@ -283,7 +350,13 @@ export class Interaction {
       else if (handle.kind === "resize")
         this.gesture = { kind: "resize", start: p, handle: handle.handle, frame, before };
       else if (frame.kind === "line")
-        this.gesture = { kind: "line-end", start: p, end: handle.end, before: frame.shape };
+        this.gesture = {
+          kind: "line-end",
+          start: p,
+          end: handle.end,
+          before: frame.shape,
+          target: handle.end === "start" ? frame.shape.from : frame.shape.to,
+        };
       return true;
     }
 
@@ -346,7 +419,7 @@ export class Interaction {
           if (Math.abs(dx) > Math.abs(dy)) dy = 0;
           else dx = 0;
         }
-        this.write(g.before, (shape) => translate(shape, dx, dy));
+        this.write(g.before, (shape) => translate(shape, dx, dy), true);
         break;
       }
       case "marquee": {
@@ -362,7 +435,8 @@ export class Interaction {
         const { frame, handle } = g;
         if (frame.kind === "box") {
           const shape = g.before.get(frame.shape.id);
-          if (shape) this.write(g.before, () => resizeBox(shape, handle, p.world, p.shiftKey));
+          if (shape)
+            this.write(g.before, () => resizeBox(shape, handle, p.world, p.shiftKey), true);
         } else {
           // Several shapes scale uniformly from the opposite corner.
           const opposite = (Object.keys(HANDLE_DIRECTIONS) as Handle[]).find((h) => {
@@ -379,7 +453,7 @@ export class Interaction {
               ? 1
               : ((p.world.x - anchor.x) * diagonal.x + (p.world.y - anchor.y) * diagonal.y) /
                 lengthSq;
-          this.write(g.before, (shape) => scaleAround(shape, anchor, Math.max(0.01, s)));
+          this.write(g.before, (shape) => scaleAround(shape, anchor, Math.max(0.01, s)), true);
         }
         break;
       }
@@ -389,21 +463,36 @@ export class Interaction {
         if (p.shiftKey) {
           // Snap the resulting angle of a single shape, or the turn of a group.
           const single = g.before.size === 1 ? [...g.before.values()][0] : undefined;
-          const base = single && single.type !== "line" ? single.rotation : 0;
+          const base = single && !isLinear(single.type) ? single.rotation : 0;
           delta = snapAngle(base + delta) - base;
         }
-        this.write(g.before, (shape) => rotateAroundPivot(shape, g.pivot, delta));
+        this.write(g.before, (shape) => rotateAroundPivot(shape, g.pivot, delta), true);
         break;
       }
       case "line-end": {
         const shape = g.before;
-        this.write(new Map([[shape.id, shape]]), () =>
-          moveLineEnd(shape, g.end, p.world, p.shiftKey),
-        );
+        let attach: ShapePatch = {};
+        if (shape.type === "arrow") {
+          // An end attaches to whatever box it's dropped on, other than the
+          // shape the other end is attached to.
+          const other = g.end === "start" ? shape.to : shape.from;
+          g.target = this.attachableAt(p, [shape.id, other]);
+          attach = g.end === "start" ? { from: g.target } : { to: g.target };
+          host.overlayChanged();
+        }
+        this.write(new Map([[shape.id, shape]]), () => ({
+          ...moveLineEnd(shape, g.end, p.world, p.shiftKey),
+          ...attach,
+        }));
         break;
       }
       case "create": {
-        const patch = createdGeometry(g.type, g.start.world, p.world, p.shiftKey);
+        let patch = createdGeometry(g.type, g.start.world, p.world, p.shiftKey);
+        if (g.type === "arrow") {
+          g.target = this.attachableAt(p, [g.from, g.id]);
+          patch = { ...patch, from: g.from, to: g.target };
+          host.overlayChanged();
+        }
         if (g.id === null) {
           const id = newShapeId();
           g.id = id;
@@ -434,6 +523,27 @@ export class Interaction {
     host.setTool("select");
     // Sticky notes are for writing on.
     if (g.type === "sticky") host.startEditing(id);
+  }
+
+  /** Adds the finished stroke. The pen stays in hand for the next one. */
+  private finishDraw(g: Extract<Gesture, { kind: "draw" }>): void {
+    const { host } = this;
+    if (g.points.length === 0) return;
+    const shape = this.newShape(newShapeId(), "freehand", {});
+    const stroke = { ...shape, ...strokeShape(g.points) };
+    host.scheduleWrite(() => host.doc.transact((tx) => tx.add(stroke)));
+    host.overlayChanged();
+  }
+
+  /** The topmost shape under `p` an arrow can attach to, other than those in `exclude`. */
+  private attachableAt(p: ToolPointer, exclude: ReadonlyArray<ShapeId | null>): ShapeId | null {
+    const tolerance = HIT_TOLERANCE / this.host.camera().zoom;
+    const shape = this.host.scene.hit(
+      p.world,
+      tolerance,
+      (s) => canAttachTo(s) && !exclude.includes(s.id),
+    );
+    return shape?.id ?? null;
   }
 
   private finishText(g: Extract<Gesture, { kind: "text" }>, p: ToolPointer): void {
@@ -471,6 +581,9 @@ export class Interaction {
       index: indexAbove(this.host.scene.ordered()),
       color: DEFAULT_COLOR[type],
       text: "",
+      points: [],
+      from: null,
+      to: null,
       ...geometry,
     };
   }
@@ -485,19 +598,26 @@ export class Interaction {
   }
 
   /**
-   * Schedules one transaction applying `patch` to every shape in `before`.
-   * A text shape's height follows its text, whatever its new width.
+   * Schedules one transaction applying `patch` to every shape in `before`,
+   * which are shapes as drawn. A text shape's height follows its text,
+   * whatever its new width. With `detach`, an arrow lets go of shapes that
+   * aren't moving with it.
    */
-  private write(before: Map<ShapeId, Shape>, patch: (shape: Shape) => ShapePatch): void {
+  private write(
+    before: Map<ShapeId, Shape>,
+    patch: (shape: Shape) => ShapePatch,
+    detach = false,
+  ): void {
     const { host } = this;
     host.scheduleWrite(() =>
       host.doc.transact((tx) => {
         for (const shape of before.values()) {
-          let change = patch(shape);
+          let change = { ...asDrawn(shape), ...patch(shape) };
           if (shape.type === "text") {
             const next = { ...shape, ...change };
             change = { ...change, ...withHeight(next, host.fittedHeight(next)) };
           }
+          if (detach) change = { ...change, ...detachUnless(shape, (id) => before.has(id)) };
           tx.update(shape.id, change);
         }
       }),
@@ -506,7 +626,7 @@ export class Interaction {
 
   private restore(before: Map<ShapeId, Shape>): void {
     this.write(before, (shape) => {
-      const { id: _id, type: _type, text: _text, ...fields } = shape;
+      const { id: _id, type: _type, text: _text, points: _points, ...fields } = shape;
       return fields;
     });
   }
@@ -519,7 +639,7 @@ export function createdGeometry(
   to: Point,
   constrain: boolean,
 ): ShapePatch {
-  if (type === "line") {
+  if (isLinear(type)) {
     const end = constrain ? snapAround(from, to) : to;
     return { x: from.x, y: from.y, w: end.x - from.x, h: end.y - from.y };
   }
@@ -548,8 +668,10 @@ function textAt(at: Point): ShapePatch {
   return { x: at.x, y: at.y - h / 2, w, h };
 }
 
-function defaultGeometry(type: ShapeType, center: Point): ShapePatch {
-  if (type === "line") {
+const penPoint = (p: ToolPointer): PenPoint => ({ ...p.world, pressure: p.pressure });
+
+function defaultGeometry(type: ShapeTool, center: Point): ShapePatch {
+  if (type === "line" || type === "arrow") {
     return { x: center.x - DEFAULT_LINE_LENGTH / 2, y: center.y, w: DEFAULT_LINE_LENGTH, h: 0 };
   }
   const { w, h } = DEFAULT_SIZE[type];

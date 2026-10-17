@@ -1,4 +1,4 @@
-import { MIN_SIZE, normalizeAngle, type Shape, type ShapePatch } from "@niro/doc";
+import { isLinear, MIN_SIZE, normalizeAngle, type Shape, type ShapePatch } from "@niro/doc";
 import { type Point, rotateAround } from "./geometry";
 import { lineEnds, shapeCenter, toShapeFrame } from "./shapes";
 
@@ -104,7 +104,7 @@ export function snapAround(origin: Point, p: Point): Point {
 
 /** Scales a shape uniformly by `s` around `anchor` (multi-selection resize). */
 export function scaleAround(shape: Shape, anchor: Point, s: number): ShapePatch {
-  if (shape.type === "line") {
+  if (isLinear(shape.type)) {
     return {
       x: anchor.x + (shape.x - anchor.x) * s,
       y: anchor.y + (shape.y - anchor.y) * s,
@@ -121,7 +121,7 @@ export function scaleAround(shape: Shape, anchor: Point, s: number): ShapePatch 
 
 /** Rotates a shape by `delta` radians around `pivot`. Lines rotate their end points. */
 export function rotateAroundPivot(shape: Shape, pivot: Point, delta: number): ShapePatch {
-  if (shape.type === "line") {
+  if (isLinear(shape.type)) {
     const [a, b] = lineEnds(shape).map((p) => rotateAround(p, pivot, delta)) as [Point, Point];
     return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
   }

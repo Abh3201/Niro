@@ -18,6 +18,9 @@ const rect = (shapeId: string, patch: Partial<Shape> = {}): Shape => ({
   index: "a0",
   color: "blue",
   text: "",
+  points: [],
+  from: null,
+  to: null,
   ...patch,
 });
 
@@ -343,6 +346,47 @@ describe("YDocStore", () => {
     store.transact((tx) => tx.editText(id("l1"), 0, 0, "still no"));
     expect(store.get(id("l1"))?.text).toBe("");
     expect(doc.getMap<Y.Map<unknown>>("shapes").get("l1")?.has("text")).toBe(false);
+  });
+
+  it("stores a stroke's points and an arrow's ends only on shapes that have them", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    const stroke = rect("f1", { type: "freehand", points: [0, 0, 50, 10_000, 10_000, 50] });
+    const arrow = rect("a1", { type: "arrow", from: id("s1"), to: null });
+    store.transact((tx) => {
+      tx.add(rect("s1"));
+      tx.add(stroke);
+      tx.add(arrow);
+    });
+    const stored = doc.getMap<Y.Map<unknown>>("shapes");
+    for (const key of ["points", "from", "to"]) expect(stored.get("s1")?.has(key)).toBe(false);
+    expect(stored.get("a1")?.get("from")).toBe("s1");
+    expect(stored.get("a1")?.has("to")).toBe(false);
+    expect(store.get(id("f1"))).toEqual(stroke);
+    expect(store.get(id("a1"))).toEqual(arrow);
+  });
+
+  it("never lets an update rewrite a stroke's points, but can attach and detach an arrow", () => {
+    const store = createYDocStore(new Y.Doc());
+    store.transact((tx) => {
+      tx.add(rect("f1", { type: "freehand", points: [0, 0, 50] }));
+      tx.add(rect("a1", { type: "arrow" }));
+    });
+    const patch = { x: 5, points: [1, 1, 1] } as unknown as ShapePatch;
+    store.transact((tx) => tx.update(id("f1"), patch));
+    expect(store.get(id("f1"))).toMatchObject({ x: 5, points: [0, 0, 50] });
+
+    store.transact((tx) => tx.update(id("a1"), { from: id("f1") }));
+    expect(store.get(id("a1"))?.from).toBe("f1");
+    store.transact((tx) => tx.update(id("a1"), { from: null }));
+    expect(store.get(id("a1"))?.from).toBeNull();
+  });
+
+  it("opens a board with strokes and arrows read-only in a version from before them", () => {
+    expect(SCHEMA_VERSION).toBe(3);
+    const doc = new Y.Doc();
+    doc.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
+    expect(createYDocStore(doc).readOnly).toBe(true);
   });
 
   it("upgrades a board from before text to the current version, so older Niros stop editing it", () => {

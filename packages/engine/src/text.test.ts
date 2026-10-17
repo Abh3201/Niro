@@ -29,6 +29,9 @@ const shape = (patch: Partial<Shape>): Shape => ({
   index: "a0",
   color: "yellow",
   text: "",
+  points: [],
+  from: null,
+  to: null,
   ...patch,
 });
 

@@ -1,4 +1,4 @@
-import type { ColorName, Shape } from "@niro/doc";
+import { type ColorName, isLinear, type Shape } from "@niro/doc";
 import { shapeCenter } from "./shapes";
 import { FONT_FAMILY, inkColor, LINE_HEIGHT, type TextLayout } from "./text";
 
@@ -63,24 +63,25 @@ export interface ShapeText {
   readonly zoom: number;
 }
 
+/** What a shape needs drawn besides its own geometry. */
+export interface ShapeExtras {
+  readonly text?: ShapeText;
+  /** A freehand stroke's outline, in its own frame. */
+  readonly stroke?: Path2D;
+}
+
 /**
- * Draws one shape, and its text when `text` is given. Expects the context
- * to be transformed to world coordinates.
+ * Draws one shape, and its text when it has some. Expects the context to
+ * be transformed to world coordinates.
  */
 export function drawShape(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
   palette: Palette,
-  text?: ShapeText,
+  extras: ShapeExtras = {},
 ): void {
-  if (shape.type === "line") {
-    ctx.strokeStyle = palette.solid[shape.color];
-    ctx.lineWidth = LINE_WIDTH;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(shape.x, shape.y);
-    ctx.lineTo(shape.x + shape.w, shape.y + shape.h);
-    ctx.stroke();
+  if (isLinear(shape.type)) {
+    drawLine(ctx, shape, palette.solid[shape.color]);
     return;
   }
 
@@ -109,12 +110,50 @@ export function drawShape(
       ctx.fillRect(-w / 2, -h / 2, w, h);
       break;
     }
+    case "freehand":
+      if (extras.stroke) {
+        ctx.fillStyle = palette.solid[shape.color];
+        ctx.fill(extras.stroke);
+      }
+      break;
     case "text":
       // Just the text.
       break;
   }
-  if (text) drawText(ctx, text, inkColor(shape, palette));
+  if (extras.text) drawText(ctx, extras.text, inkColor(shape, palette));
   ctx.restore();
+}
+
+/** Length of an arrowhead, in world units; narrower arrows get smaller heads. */
+const ARROWHEAD = LINE_WIDTH * 4;
+
+/** A line, or an arrow with a filled head at its end. */
+function drawLine(ctx: CanvasRenderingContext2D, shape: Shape, color: string): void {
+  const { x, y, w, h } = shape;
+  const length = Math.hypot(w, h);
+  const head = shape.type === "arrow" ? Math.min(ARROWHEAD, length * 0.5) : 0;
+  // The shaft stops inside the head, so its round cap can't poke through the tip.
+  const shaft = length > 0 ? Math.max(0, length - head * 0.6) / length : 1;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = LINE_WIDTH;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w * shaft, y + h * shaft);
+  ctx.stroke();
+  if (head <= 0) return;
+  const ux = w / length;
+  const uy = h / length;
+  const tip = { x: x + w, y: y + h };
+  const back = { x: tip.x - ux * head, y: tip.y - uy * head };
+  const half = head * 0.45;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(back.x - uy * half, back.y + ux * half);
+  ctx.lineTo(back.x + uy * half, back.y - ux * half);
+  ctx.closePath();
+  ctx.fill();
 }
 
 /** Draws laid-out text, in the shape's own frame. */

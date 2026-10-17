@@ -6,21 +6,43 @@ import { isValidIndex } from "./order";
  * on load; older versions of Niro open newer boards read-only.
  *
  * 2: text shapes, and text on rectangles, ellipses and sticky notes.
+ * 3: freehand strokes, and arrows that can be attached to shapes.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
 
 export const newShapeId = (): ShapeId => nanoid() as ShapeId;
 
-export const SHAPE_TYPES = ["rectangle", "ellipse", "sticky", "line", "text"] as const;
+export const SHAPE_TYPES = [
+  "rectangle",
+  "ellipse",
+  "sticky",
+  "line",
+  "text",
+  "freehand",
+  "arrow",
+] as const;
 export type ShapeType = (typeof SHAPE_TYPES)[number];
 
-/** Shapes that hold text. Lines don't. */
+/** Shapes that hold text: not lines, arrows or freehand strokes. */
 export function holdsText(type: ShapeType): boolean {
-  return type !== "line";
+  return type === "rectangle" || type === "ellipse" || type === "sticky" || type === "text";
 }
+
+/** Lines and arrows: two end points rather than a box. */
+export function isLinear(type: ShapeType): boolean {
+  return type === "line" || type === "arrow";
+}
+
+/**
+ * `Shape.points` values: a stroke's points are stored as whole numbers from
+ * 0 to this across its box, and pressure from 0 to 100. Whole numbers take
+ * two or three bytes each in an update; decimals take nine.
+ */
+export const POINT_SCALE = 10_000;
+export const PRESSURE_SCALE = 100;
 
 /**
  * Colors are stored by name, not as hex, so each theme (light, dark) can draw
@@ -44,6 +66,8 @@ export const DEFAULT_COLOR: Record<ShapeType, ColorName> = {
   sticky: "yellow",
   line: "black",
   text: "black",
+  freehand: "black",
+  arrow: "black",
 };
 
 /** Smallest width and height a box shape can have, in world units. */
@@ -52,13 +76,15 @@ export const MIN_SIZE = 1;
 /**
  * A shape on the board.
  *
- * Box shapes (rectangle, ellipse, sticky, text): `(x, y)` is the top-left
- * corner of the unrotated box, `w` and `h` its size, and `rotation` turns the
- * box around its center. A text shape's height follows its text.
+ * Box shapes (rectangle, ellipse, sticky, text, freehand): `(x, y)` is the
+ * top-left corner of the unrotated box, `w` and `h` its size, and `rotation`
+ * turns the box around its center. A text shape's height follows its text;
+ * a freehand stroke's points stretch with its box.
  *
- * Lines: `(x, y)` is the start point and `(x + w, y + h)` the end point, so
- * `w` and `h` may be negative. `rotation` is always 0; rotating a line moves
- * its end points.
+ * Lines and arrows: `(x, y)` is the start point and `(x + w, y + h)` the end
+ * point, so `w` and `h` may be negative. `rotation` is always 0; rotating one
+ * moves its end points. An arrow end attached to a shape (`from`, `to`)
+ * follows it: the stored point is only where that end was last placed.
  */
 export interface Shape {
   readonly id: ShapeId;
@@ -80,10 +106,21 @@ export interface Shape {
    * change it with `Tx.editText`, never by replacing it.
    */
   readonly text: string;
+  /**
+   * A freehand stroke's points, three numbers each: across and down its box
+   * (0 to `POINT_SCALE`) and pen pressure (0 to `PRESSURE_SCALE`). Empty on
+   * every other shape. Set when the stroke is added and never changed:
+   * moving, resizing and rotating change only the box.
+   */
+  readonly points: readonly number[];
+  /** The shape an arrow's start is attached to, or null. Always null on other shapes. */
+  readonly from: ShapeId | null;
+  /** The shape an arrow's end is attached to, or null. Always null on other shapes. */
+  readonly to: ShapeId | null;
 }
 
-/** Fields `Tx.update` can set. Text changes go through `Tx.editText`. */
-export type ShapePatch = Partial<Omit<Shape, "id" | "type" | "text">>;
+/** Fields `Tx.update` can set. Text changes go through `Tx.editText`; points never change. */
+export type ShapePatch = Partial<Omit<Shape, "id" | "type" | "text" | "points">>;
 
 const TAU = Math.PI * 2;
 
@@ -108,7 +145,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const type = raw.type;
   if (typeof type !== "string" || !(SHAPE_TYPES as readonly string[]).includes(type)) return null;
   const shapeType = type as ShapeType;
-  const isLine = shapeType === "line";
+  const isLine = isLinear(shapeType);
 
   let w = finite(raw.w, 100);
   let h = finite(raw.h, 100);
@@ -120,6 +157,9 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const index = raw.index;
   const parentId = raw.parentId;
   const text = raw.text;
+  const isArrow = shapeType === "arrow";
+  const attached = (value: unknown) =>
+    isArrow && typeof value === "string" && value !== id ? (value as ShapeId) : null;
 
   return {
     id: id as ShapeId,
@@ -136,5 +176,21 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
         ? (color as ColorName)
         : DEFAULT_COLOR[shapeType],
     text: typeof text === "string" && holdsText(shapeType) ? text : "",
+    points: shapeType === "freehand" ? readPoints(raw.points) : [],
+    from: attached(raw.from),
+    to: attached(raw.to),
   };
+}
+
+/** Stroke points as stored, or none when they aren't whole triples of numbers in range. */
+function readPoints(raw: unknown): readonly number[] {
+  if (!Array.isArray(raw) || raw.length % 3 !== 0) return [];
+  const points = new Array<number>(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    const value = raw[i];
+    if (typeof value !== "number" || !Number.isFinite(value)) return [];
+    const max = i % 3 === 2 ? PRESSURE_SCALE : POINT_SCALE;
+    points[i] = Math.min(max, Math.max(0, value));
+  }
+  return points;
 }
