@@ -1,10 +1,54 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "files": {
     "includes": ["**", "!**/build", "!**/dist", "!**/.react-router", "!pnpm-lock.yaml"]
   },
-  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/engine/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "react": "packages/engine must not depend on React or a sync library (CLAUDE.md, architecture rules). Go through DocStore.",
+                  "react-dom": "packages/engine must not depend on React or a sync library (CLAUDE.md, architecture rules). Go through DocStore.",
+                  "yjs": "packages/engine must not depend on React or a sync library (CLAUDE.md, architecture rules). Go through DocStore.",
+                  "loro-crdt": "packages/engine must not depend on React or a sync library (CLAUDE.md, architecture rules). Go through DocStore.",
+                  "y-protocols": "packages/engine must not depend on React or a sync library (CLAUDE.md, architecture rules). Go through DocStore.",
+                  "@niro/doc/yjs": "packages/engine must not depend on React or a sync library (CLAUDE.md, architecture rules). Go through DocStore."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

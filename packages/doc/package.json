@@ -5,9 +5,15 @@
   "type": "module",
   "description": "Board document model: shape types, the DocStore interface, schema and migrations.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./yjs": "./src/yjs.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "fractional-indexing": "^4.0.0",
+    "nanoid": "^6.0.2",
+    "yjs": "^13.6.33"
   }
 }
