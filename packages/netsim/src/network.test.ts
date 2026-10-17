@@ -79,6 +79,17 @@ describe("Network connections", () => {
     expect(s.received).toEqual(Array.from({ length: 200 }, (_, i) => String(i)));
   });
 
+  it("delivers a server's first message after the client's onopen", () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const sim = new Simulation(seed);
+      const net = new Network(sim, { latency: [1, 100] });
+      net.listen("server", (conn) => conn.send("welcome"));
+      const { log } = client(net, "alice");
+      sim.runUntilIdle();
+      expect(log).toEqual(["open", "msg:welcome"]);
+    }
+  });
+
   it("closes gracefully: queued messages arrive before the other end's onclose", () => {
     const sim = new Simulation(3);
     const net = new Network(sim);

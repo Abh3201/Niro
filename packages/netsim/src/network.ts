@@ -105,13 +105,17 @@ export class Network {
         return;
       }
       link.server.readyState = "open";
-      accept(link.server);
-      this.sim.schedule(this.latency(), () => {
+      const openDelay = this.latency();
+      this.sim.schedule(openDelay, () => {
         if (link.broken) return;
         link.client.readyState = "open";
         this.trace("open", from, to);
         link.client.onopen?.();
       });
+      // Whatever the server sends at once arrives after the client's `onopen`,
+      // as on a real WebSocket, where frames follow the handshake response.
+      link.server.lastArrival = this.sim.now + openDelay;
+      accept(link.server);
     });
     return link.client;
   }
