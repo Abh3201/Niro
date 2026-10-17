@@ -89,6 +89,24 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)
 
+  labs/l2-websocket:
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.2
+        version: 8.18.2
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0
+
+  labs/l3-own-sync:
+    dependencies:
+      '@niro/netsim':
+        specifier: workspace:*
+        version: link:../../packages/netsim
+
   labs/l6-yjs-vs-loro:
     dependencies:
       loro-crdt:
@@ -122,6 +140,8 @@ importers:
       '@niro/doc':
         specifier: workspace:*
         version: link:../doc
+
+  packages/netsim: {}
 
 packages:
 

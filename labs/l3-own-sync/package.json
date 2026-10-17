@@ -1,0 +1,14 @@
+{
+  "name": "@niro/lab-l3-own-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lab L3: a server-authoritative last-writer-wins sync, fuzzed over the simulated network.",
+  "scripts": {
+    "fuzz": "FUZZ_SEEDS=50000 vitest run --root ../.. labs/l3-own-sync",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@niro/netsim": "workspace:*"
+  }
+}
