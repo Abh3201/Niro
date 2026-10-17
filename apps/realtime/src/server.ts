@@ -88,6 +88,9 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     };
     alive.set(ws, true);
     ws.on("pong", () => alive.set(ws, true));
+    // A protocol error (a message over the size limit, a bad frame): ws closes
+    // the connection itself. Without a listener, the error would crash the process.
+    ws.on("error", () => {});
     ws.on("message", (data, isBinary) => {
       if (!isBinary || !Buffer.isBuffer(data)) {
         ws.close(CloseCode.InvalidMessage, "binary messages only");

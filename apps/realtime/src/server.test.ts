@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { createRealtimeServer, type RealtimeServer } from "./server";
+import { createRealtimeServer, MAX_MESSAGE_BYTES, type RealtimeServer } from "./server";
 
 const SECRET = "test-secret-0123456789abcdef0123456789";
 const BOARD = "board-0123456789";
@@ -132,6 +132,18 @@ describe("rooms", () => {
     expect(server.rooms.size).toBe(1);
     a.client.destroy();
     await until(() => server.rooms.size === 0);
+  });
+
+  it("closes a connection that sends a message over the size limit, and stays up", async () => {
+    const ws = new WebSocket(url(issueToken(SECRET, BOARD, "view")));
+    ws.on("error", () => {});
+    await new Promise((resolve) => ws.once("open", resolve));
+    const closed = new Promise<number>((resolve) => ws.once("close", (code) => resolve(code)));
+    ws.send(new Uint8Array(MAX_MESSAGE_BYTES + 1));
+    expect(await closed).toBe(1009);
+
+    const a = tab();
+    await until(() => a.client.status === "online");
   });
 
   it("closes clients with 1001 when the server shuts down", async () => {
