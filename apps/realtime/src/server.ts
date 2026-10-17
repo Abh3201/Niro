@@ -1,11 +1,26 @@
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
-import type { AddressInfo } from "node:net";
-import { BOARD_ID, CloseCode, type Peer, PROTOCOL_VERSION, type Role, Room } from "@niro/sync";
+import type { AddressInfo, Socket as NetSocket } from "node:net";
+import { countShapes } from "@niro/doc/yjs";
+import {
+  BOARD_ID,
+  type BoardStorage,
+  CloseCode,
+  isSyncStep2,
+  type Lease,
+  MemoryStorage,
+  type Peer,
+  PROTOCOL_VERSION,
+  type Role,
+  type Room,
+  RoomHost,
+} from "@niro/sync";
 import { verifyToken } from "@niro/sync/auth";
 import { type WebSocket, WebSocketServer } from "ws";
+import type * as Y from "yjs";
+import { CONTENT_TYPE, Counter, Histogram, Registry, Sampled } from "./metrics";
+import { TokenBucket } from "./rate";
 
-/** Largest single WebSocket message accepted, in bytes. */
-export const MAX_MESSAGE_BYTES = 1024 * 1024;
 /** Queued bytes above which a connection's cursor updates are skipped. */
 const SOFT_BUFFER_BYTES = 256 * 1024;
 /**
@@ -14,98 +29,339 @@ const SOFT_BUFFER_BYTES = 256 * 1024;
  * missing, once, instead of every intermediate update.
  */
 const HARD_BUFFER_BYTES = 8 * 1024 * 1024;
+/** How long a connection waits for its board to load before it's refused. */
+const LOAD_TIMEOUT_MS = 10_000;
+
+/** Starting values from the plan, not measured yet: `/metrics` is how to tune them. */
+export interface Limits {
+  /** Largest message, except a connection's first catch-up (sync step 2). */
+  messageBytes: number;
+  /**
+   * About the largest a board gets before it turns read-only. A catch-up
+   * message may be up to twice this: a client can hold a board slightly over
+   * the limit, and it may have to send all of it after the server lost data.
+   */
+  documentBytes: number;
+  /** Shapes on a board before it turns read-only. */
+  shapes: number;
+  /** Connections to one board. */
+  connectionsPerRoom: number;
+  /** Messages a connection may send per second, sustained. Bursts of twice that pass. */
+  messagesPerSecond: number;
+  /** Bytes a connection may send per second, sustained. Bursts of four times that pass. */
+  bytesPerSecond: number;
+}
+
+export const DEFAULT_LIMITS: Limits = {
+  messageBytes: 1024 * 1024,
+  documentBytes: 20 * 1024 * 1024,
+  shapes: 10_000,
+  connectionsPerRoom: 100,
+  messagesPerSecond: 200,
+  bytesPerSecond: 1024 * 1024,
+};
 
 export interface RealtimeServerOptions {
   /** Signs access tokens; shared with the web app (`NIRO_SECRET`). */
   secret: string;
+  /** Where boards are kept between sessions. Default: in memory, lost on restart. */
+  storage?: BoardStorage;
+  limits?: Partial<Limits>;
+  /** When set, `/metrics` needs `Authorization: Bearer <token>`. */
+  metricsToken?: string;
   /** Pings every connection this often and drops those that missed the last ping. */
   pingIntervalMs?: number;
+  /** Failures that belong to no one connection: storage, mostly. Default: console.error. */
+  log?: (message: string, error: unknown) => void;
 }
 
 export interface RealtimeServer {
   listen(port: number, host?: string): Promise<AddressInfo>;
-  /** Closes every client with code 1001 ("going away"), then stops listening. */
+  /**
+   * Refuses new connections, closes every client with 1001 ("going away"),
+   * writes every board, then stops listening. Doesn't close the storage.
+   */
   close(): Promise<void>;
-  /** Boards with someone connected. */
+  /** Boards with someone connected, or still being written. */
   readonly rooms: ReadonlyMap<string, Room>;
 }
 
 /**
- * The realtime server: one `Room` per open board, kept in memory while
- * anyone is connected. P3a has no storage: the board lives in the browsers
- * (IndexedDB) and the room is rebuilt from them, so a board nobody has open
- * isn't on the server at all. P3b adds Postgres.
+ * The realtime server: one `Room` per open board, loaded from storage when
+ * the first person connects and written back as people edit (`RoomHost`).
  */
 export function createRealtimeServer(options: RealtimeServerOptions): RealtimeServer {
-  const rooms = new Map<string, Room>();
+  const limits: Limits = { ...DEFAULT_LIMITS, ...options.limits };
+  const log = options.log ?? ((message, error) => console.error(message, error));
   const alive = new WeakMap<WebSocket, boolean>();
+  /** Connections per board, counted from before the board loads so a crowd can't race past the limit. */
+  const connections = new Map<string, number>();
+  let closing = false;
+
+  const registry = new Registry();
+  const metrics = {
+    opened: registry.add(
+      new Counter("niro_connections_opened_total", "WebSocket connections accepted."),
+    ),
+    rejected: registry.add(
+      new Counter(
+        "niro_connections_rejected_total",
+        "Upgrade requests refused, by reason.",
+        [
+          "not_found",
+          "bad_request",
+          "unauthorized",
+          "shutting_down",
+          "room_full",
+          "unavailable",
+        ].map((reason) => ({ reason })),
+      ),
+    ),
+    dropped: registry.add(
+      new Counter(
+        "niro_connections_dropped_total",
+        "Connections the server closed, by reason.",
+        ["invalid", "too_big", "rate_limited", "too_slow", "unresponsive"].map((reason) => ({
+          reason,
+        })),
+      ),
+    ),
+    messagesIn: registry.add(new Counter("niro_messages_received_total", "Messages from clients.")),
+    bytesIn: registry.add(
+      new Counter("niro_received_bytes_total", "Bytes of messages from clients."),
+    ),
+    messagesOut: registry.add(new Counter("niro_messages_sent_total", "Messages to clients.")),
+    bytesOut: registry.add(new Counter("niro_sent_bytes_total", "Bytes of messages to clients.")),
+    flushes: registry.add(
+      new Counter("niro_flushes_total", "Writes to storage, by kind.", [
+        { kind: "append" },
+        { kind: "snapshot" },
+      ]),
+    ),
+    storageErrors: registry.add(
+      new Counter("niro_storage_errors_total", "Failed loads and writes. Writes are retried."),
+    ),
+    flushSeconds: registry.add(
+      new Histogram(
+        "niro_flush_duration_seconds",
+        "How long writes to storage take.",
+        [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+      ),
+    ),
+    documentBytes: registry.add(
+      new Histogram(
+        "niro_document_bytes",
+        "Board size at each write (an upper bound between compactions).",
+        [1e3, 1e4, 1e5, 1e6, 5e6, 1e7, 2e7, 5e7],
+      ),
+    ),
+  };
+
+  const shapeCounts = new WeakMap<Y.Doc, { readonly count: number }>();
+  const host = new RoomHost({
+    storage: options.storage ?? new MemoryStorage(),
+    maxDocumentBytes: limits.documentBytes,
+    isFull(doc) {
+      let counter = shapeCounts.get(doc);
+      if (!counter) {
+        // Called first right after the board loads, then after every change.
+        counter = countShapes(doc);
+        shapeCounts.set(doc, counter);
+      }
+      return counter.count >= limits.shapes;
+    },
+    onFlush(info) {
+      metrics.flushes.inc({ kind: info.compacted ? "snapshot" : "append" });
+      metrics.flushSeconds.observe(info.durationMs / 1000);
+      metrics.documentBytes.observe(info.documentBytes);
+    },
+    onError(error, boardId) {
+      metrics.storageErrors.inc();
+      log(`storage failed for board ${boardId}; will retry`, error);
+    },
+  });
+
+  registry.add(
+    new Sampled("niro_connections", "gauge", "Open WebSocket connections.", () => wss.clients.size),
+  );
+  registry.add(new Sampled("niro_rooms", "gauge", "Boards open in memory.", () => host.rooms.size));
+  registry.add(
+    new Sampled("niro_rooms_read_only", "gauge", "Open boards that reached a limit.", () => {
+      let count = 0;
+      for (const room of host.rooms.values()) if (room.readOnly !== null) count++;
+      return count;
+    }),
+  );
+  registry.add(
+    new Sampled(
+      "niro_unwritten_changes",
+      "gauge",
+      "Changes not in storage yet.",
+      () => host.unwritten,
+    ),
+  );
+  registry.add(
+    new Sampled("niro_updates_applied_total", "counter", "Document updates applied.", () => {
+      return host.stats.updatesApplied;
+    }),
+  );
+  registry.add(
+    new Sampled(
+      "niro_updates_refused_total",
+      "counter",
+      "Document updates refused: from viewers, or to read-only boards.",
+      () => host.stats.updatesRefused,
+    ),
+  );
 
   const http = createServer((req, res) => {
-    if (req.method === "GET" && pathname(req) === "/healthz") {
+    const path = pathname(req);
+    if (req.method === "GET" && path === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+    if (req.method === "GET" && path === "/metrics") {
+      if (options.metricsToken && !bearerMatches(req, options.metricsToken)) {
+        res.writeHead(401, { "www-authenticate": "Bearer" }).end();
+        return;
+      }
+      res.writeHead(200, { "content-type": CONTENT_TYPE });
+      res.end(registry.render());
       return;
     }
     res.writeHead(404).end();
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.documentBytes * 2 });
 
   // Checked before the upgrade, so a refused client costs one HTTP response.
   // Browsers can't read the status, so the client learns of a bad link from
   // the web app's token endpoint, not from here.
-  http.on("upgrade", (req, socket, head) => {
-    const refuse = (status: string) =>
+  http.on("upgrade", (req: IncomingMessage, socket: NetSocket, head: Buffer) => {
+    // Until ws takes the socket over, nothing else listens for its errors (a
+    // client resetting the connection while its board loads), and an
+    // unheard error would crash the process.
+    socket.on("error", () => socket.destroy());
+    const refuse = (status: string, reason: string) => {
+      metrics.rejected.inc({ reason });
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    };
     const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== "/ws") return refuse("404 Not Found");
-    if (url.searchParams.get("v") !== String(PROTOCOL_VERSION)) return refuse("400 Bad Request");
+    if (url.pathname !== "/ws") return refuse("404 Not Found", "not_found");
+    if (url.searchParams.get("v") !== String(PROTOCOL_VERSION))
+      return refuse("400 Bad Request", "bad_request");
     const boardId = url.searchParams.get("board") ?? "";
-    if (!BOARD_ID.test(boardId)) return refuse("400 Bad Request");
+    if (!BOARD_ID.test(boardId)) return refuse("400 Bad Request", "bad_request");
     const grant = verifyToken(options.secret, url.searchParams.get("token") ?? "");
-    if (!grant || grant.boardId !== boardId) return refuse("401 Unauthorized");
-    wss.handleUpgrade(req, socket, head, (ws) => connect(ws, boardId, grant.role));
+    if (!grant || grant.boardId !== boardId) return refuse("401 Unauthorized", "unauthorized");
+    if (closing) return refuse("503 Service Unavailable", "shutting_down");
+    const count = connections.get(boardId) ?? 0;
+    if (count >= limits.connectionsPerRoom) return refuse("503 Service Unavailable", "room_full");
+
+    connections.set(boardId, count + 1);
+    const unreserve = () => {
+      const left = (connections.get(boardId) ?? 1) - 1;
+      if (left > 0) connections.set(boardId, left);
+      else connections.delete(boardId);
+    };
+    acquireWithin(host, boardId, LOAD_TIMEOUT_MS)
+      .then(
+        (lease) => {
+          if (socket.destroyed || closing) {
+            // The client gave up while the board loaded, or the server is stopping.
+            lease.release();
+            unreserve();
+            if (!socket.destroyed) refuse("503 Service Unavailable", "shutting_down");
+            return;
+          }
+          // ws answers a malformed upgrade itself and never calls back; the
+          // socket closing is then the only sign, and the lease must go back.
+          let upgraded = false;
+          const abandoned = () => {
+            if (upgraded) return;
+            lease.release();
+            unreserve();
+          };
+          socket.once("close", abandoned);
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            upgraded = true;
+            socket.off("close", abandoned);
+            connect(ws, lease, grant.role, unreserve);
+          });
+        },
+        (error: unknown) => {
+          unreserve();
+          metrics.storageErrors.inc();
+          log(`could not load board ${boardId}`, error);
+          refuse("503 Service Unavailable", "unavailable");
+        },
+      )
+      .catch((error: unknown) => log("upgrade failed", error));
   });
 
-  function connect(ws: WebSocket, boardId: string, role: Role): void {
-    let room = rooms.get(boardId);
-    if (!room) {
-      room = new Room();
-      rooms.set(boardId, room);
-    }
-    const joined = room;
+  function connect(ws: WebSocket, lease: Lease, role: Role, unreserve: () => void): void {
+    const room = lease.room;
+    const messages = new TokenBucket(limits.messagesPerSecond, limits.messagesPerSecond * 2);
+    const bytes = new TokenBucket(limits.bytesPerSecond, limits.bytesPerSecond * 4);
+    let caughtUp = false;
+    let dropping = false;
+    metrics.opened.inc();
+
+    const drop = (reason: string, code: number, message: string) => {
+      if (dropping) return;
+      dropping = true;
+      metrics.dropped.inc({ reason });
+      ws.close(code, message);
+    };
     const peer: Peer = {
       send(data, droppable) {
         if (ws.readyState !== ws.OPEN) return;
         if (ws.bufferedAmount > HARD_BUFFER_BYTES) {
+          metrics.dropped.inc({ reason: "too_slow" });
           ws.terminate();
           return;
         }
         if (droppable && ws.bufferedAmount > SOFT_BUFFER_BYTES) return;
+        metrics.messagesOut.inc();
+        metrics.bytesOut.inc({}, data.length);
         ws.send(data);
       },
       close: (code, reason) => ws.close(code, reason),
     };
     alive.set(ws, true);
     ws.on("pong", () => alive.set(ws, true));
-    // A protocol error (a message over the size limit, a bad frame): ws closes
+    // A protocol error (a message over `maxPayload`, a bad frame): ws closes
     // the connection itself. Without a listener, the error would crash the process.
     ws.on("error", () => {});
     ws.on("message", (data, isBinary) => {
+      if (dropping) return;
       if (!isBinary || !Buffer.isBuffer(data)) {
-        ws.close(CloseCode.InvalidMessage, "binary messages only");
+        drop("invalid", CloseCode.InvalidMessage, "binary messages only");
         return;
       }
-      joined.receive(peer, data);
+      metrics.messagesIn.inc();
+      metrics.bytesIn.inc({}, data.length);
+      // The first catch-up can be the whole board: it's exempt from the
+      // size and rate limits. Everything after it is a live change, or cursors.
+      if (!caughtUp && isSyncStep2(data)) {
+        caughtUp = true;
+      } else if (data.length > limits.messageBytes) {
+        // The client reconnects and sends it again as part of its catch-up.
+        drop("too_big", CloseCode.TooBig, "message too big");
+        return;
+      } else if (!messages.take() || !bytes.take(data.length)) {
+        drop("rate_limited", CloseCode.RateLimited, "too many messages");
+        return;
+      }
+      room.receive(peer, data);
     });
     ws.on("close", () => {
-      joined.leave(peer);
-      if (joined.size === 0 && rooms.get(boardId) === joined) {
-        joined.destroy();
-        rooms.delete(boardId);
-      }
+      room.leave(peer);
+      lease.release();
+      unreserve();
     });
-    joined.join(peer, role);
+    room.join(peer, role);
   }
 
   // A browser that vanished (lid closed, network gone) sends no close frame.
@@ -113,6 +369,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   const pinger = setInterval(() => {
     for (const ws of wss.clients) {
       if (!alive.get(ws)) {
+        metrics.dropped.inc({ reason: "unresponsive" });
         ws.terminate();
         continue;
       }
@@ -123,28 +380,58 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   pinger.unref();
 
   return {
-    rooms,
-    listen(port, host) {
+    get rooms() {
+      return host.rooms;
+    },
+    listen(port, hostname) {
       return new Promise((resolve, reject) => {
         http.once("error", reject);
-        http.listen(port, host, () => {
+        http.listen(port, hostname, () => {
           http.off("error", reject);
           resolve(http.address() as AddressInfo);
         });
       });
     },
     async close() {
+      closing = true;
       clearInterval(pinger);
       for (const client of wss.clients) client.close(1001, "server shutting down");
       await new Promise<void>((resolve) => wss.close(() => resolve()));
-      for (const room of rooms.values()) room.destroy();
-      rooms.clear();
+      await host.close();
       if (!http.listening) return;
       await new Promise<void>((resolve, reject) =>
         http.close((err) => (err ? reject(err) : resolve())),
       );
     },
   };
+}
+
+/** `host.acquire`, refused after `ms`. A lease that arrives later is given straight back. */
+function acquireWithin(host: RoomHost, boardId: string, ms: number): Promise<Lease> {
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error(`loading took over ${ms} ms`));
+    }, ms);
+    host.acquire(boardId).then(
+      (lease) => {
+        clearTimeout(timer);
+        if (timedOut) lease.release();
+        else resolve(lease);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function bearerMatches(req: IncomingMessage, token: string): boolean {
+  const given = Buffer.from(req.headers.authorization ?? "");
+  const expected = Buffer.from(`Bearer ${token}`);
+  return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 function pathname(req: IncomingMessage): string {

@@ -61,8 +61,7 @@ export class Simulation {
 
   /** Runs every event up to and including virtual time `until`, then sets the clock to it. */
   runUntil(until: number): void {
-    while (this.queue.length > 0 && (this.peek()?.time ?? Number.POSITIVE_INFINITY) <= until)
-      this.step();
+    while (this.nextTime() <= until) this.step();
     this.time = Math.max(this.time, until);
   }
 
@@ -80,14 +79,67 @@ export class Simulation {
     throw new Error(`still busy after ${maxEvents} events at t=${this.time}ms (seed ${this.seed})`);
   }
 
+  /**
+   * Simulated asynchronous work, like a database query: runs `fn` after
+   * `delay` virtual milliseconds and settles the promise with its result.
+   *
+   * Code awaiting the promise continues in a microtask, which the plain
+   * runners above never yield to. Use the `Async` runners below for systems
+   * that await: they let every microtask finish after each event, as a real
+   * event loop would, so runs stay deterministic.
+   */
+  later<T>(delay: number, fn: () => T | PromiseLike<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.schedule(delay, () => {
+        try {
+          resolve(fn());
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  /** `step`, then lets all microtasks run. */
+  async stepAsync(): Promise<boolean> {
+    const ran = this.step();
+    await drainMicrotasks();
+    return ran;
+  }
+
+  /** `runUntil`, letting microtasks run after each event. */
+  async runUntilAsync(until: number): Promise<void> {
+    await drainMicrotasks();
+    while (this.nextTime() <= until) await this.stepAsync();
+    this.time = Math.max(this.time, until);
+  }
+
+  /** `advance`, letting microtasks run after each event. */
+  async advanceAsync(ms: number): Promise<void> {
+    await this.runUntilAsync(this.time + ms);
+  }
+
+  /** `runUntilIdle`, letting microtasks run after each event. */
+  async runUntilIdleAsync(maxEvents = 1_000_000): Promise<void> {
+    await drainMicrotasks();
+    for (let n = 0; n < maxEvents; n++) if (!(await this.stepAsync())) return;
+    throw new Error(`still busy after ${maxEvents} events at t=${this.time}ms (seed ${this.seed})`);
+  }
+
   // A binary min-heap ordered by (time, seq).
 
   private before(a: Event, b: Event): boolean {
     return a.time < b.time || (a.time === b.time && a.seq < b.seq);
   }
 
-  private peek(): Event | undefined {
-    return this.queue[0];
+  /**
+   * Time of the next event that will actually run. Cancelled events are
+   * dropped from the front first: otherwise one there would let `runUntil`
+   * run a live event scheduled after `until`.
+   */
+  private nextTime(): number {
+    while (this.queue[0]?.cancelled) this.pop();
+    return this.queue[0]?.time ?? Number.POSITIVE_INFINITY;
   }
 
   private push(event: Event): void {
@@ -122,4 +174,12 @@ export class Simulation {
     }
     return top;
   }
+}
+
+/**
+ * Resolves after every queued microtask, including ones queued along the
+ * way, has run: a macrotask always waits for the microtask queue to empty.
+ */
+function drainMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }

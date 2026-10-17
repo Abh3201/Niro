@@ -8,6 +8,7 @@ import {
   CloseCode,
   HEARTBEAT,
   MessageType,
+  readOnlyMessage,
   syncStep1,
   syncUpdate,
 } from "./protocol";
@@ -41,8 +42,10 @@ interface Member {
  * - Joining starts the two-step sync: the room sends its state vector
  *   (step 1); the client answers with what the room is missing (step 2) and
  *   sends its own state vector, which the room answers the same way.
- * - Every update an editor sends is applied and relayed to everyone else.
- *   Updates from view-only connections are dropped.
+ * - Every update an editor sends is applied and relayed to everyone else
+ *   (see `receiveSync` for when its sender gets it back too).
+ *   Updates from view-only connections are dropped, and so is every update
+ *   once the room is read-only (`setReadOnly`).
  * - Presence is relayed but never touches the document.
  */
 export class Room {
@@ -50,6 +53,7 @@ export class Room {
   readonly awareness = new Awareness(this.doc);
   readonly stats = { updatesApplied: 0, updatesRefused: 0 };
   private readonly members = new Map<Peer, Member>();
+  private readOnlyReason: string | null = null;
 
   constructor() {
     // The server is not a participant: it has no presence of its own.
@@ -62,8 +66,27 @@ export class Room {
     return this.members.size;
   }
 
+  /** Why the room takes no more changes, or null while it does. */
+  get readOnly(): string | null {
+    return this.readOnlyReason;
+  }
+
+  /**
+   * Stops taking changes from anyone and tells everyone why, now and as
+   * they join. For limits: refusing every update after the one that crossed
+   * the line keeps all copies equal, where refusing single updates wouldn't.
+   */
+  setReadOnly(reason: string): void {
+    if (this.readOnlyReason !== null) return;
+    this.readOnlyReason = reason;
+    const message = readOnlyMessage(reason);
+    for (const peer of this.members.keys()) peer.send(message, false);
+  }
+
   join(peer: Peer, role: Role): void {
     this.members.set(peer, { role, clientId: null });
+    // Before step 1, so the client knows by the time it's caught up.
+    if (this.readOnlyReason !== null) peer.send(readOnlyMessage(this.readOnlyReason), false);
     peer.send(syncStep1(this.doc), false);
     const present = [...this.awareness.getStates().keys()];
     if (present.length > 0) peer.send(awarenessMessage(this.awareness, present), true);
@@ -112,12 +135,15 @@ export class Room {
     if (type !== sync.messageYjsSyncStep2 && type !== sync.messageYjsUpdate)
       throw new Error("bad sync type");
     const update = decoding.readVarUint8Array(decoder);
-    if (member.role !== "edit") {
+    if (member.role !== "edit" || this.readOnlyReason !== null) {
       this.stats.updatesRefused++;
       return;
     }
-    // `peer` as the origin, so the update is relayed to everyone but its sender.
-    Y.applyUpdate(this.doc, update, peer);
+    // Relayed to everyone but its sender, who has it. Unless the room holds
+    // updates waiting for something they depend on: this one may complete
+    // them, and then what's relayed includes them, which the sender lacks.
+    const waiting = this.doc.store.pendingStructs !== null || this.doc.store.pendingDs !== null;
+    Y.applyUpdate(this.doc, update, waiting ? null : peer);
     this.stats.updatesApplied++;
   }
 

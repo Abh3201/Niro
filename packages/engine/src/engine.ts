@@ -102,6 +102,9 @@ const MAX_LABEL_CHARS = 24;
 const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
 
+/** The tools that work on a board that can't be edited. */
+const VIEW_TOOLS: ReadonlySet<ToolName> = new Set(["select", "hand"]);
+
 const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
   v: "select",
   h: "hand",
@@ -216,6 +219,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const unsubscribeDoc = doc.subscribe((changes) => {
     scene.apply(changes);
+    // Editing just stopped (the board filled up): drop any drawing tool.
+    if (doc.readOnly && !VIEW_TOOLS.has(state.tool)) setTool("select");
     const selection = state.selection.filter((id) => scene.has(id));
     setState({
       ...state,
@@ -427,7 +432,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const resetZoom = () => setCamera(zoomAt(state.camera, viewportCenter(), 1));
 
   function setTool(tool: ToolName) {
-    if (tool === state.tool) return;
+    if (tool === state.tool || (doc.readOnly && !VIEW_TOOLS.has(tool))) return;
     interaction.cancel();
     setState({ ...state, tool });
     input.refreshCursor();

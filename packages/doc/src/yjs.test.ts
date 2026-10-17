@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { SCHEMA_VERSION, type Shape, type ShapeId } from "./shape";
 import type { Origin, ShapeChange } from "./store";
-import { createYDocStore } from "./yjs";
+import { countShapes, createYDocStore } from "./yjs";
 
 const id = (s: string) => s as ShapeId;
 
@@ -226,6 +226,23 @@ describe("YDocStore", () => {
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
   });
 
+  it("can be made read-only and editable again, and tells its listeners each time", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    const calls: number[] = [];
+    store.subscribe((changes) => calls.push(changes.length));
+    store.setReadOnly(true);
+    store.setReadOnly(true);
+    store.transact((tx) => tx.add(rect("s1")));
+    expect(store.readOnly).toBe(true);
+    expect(store.get(id("s1"))).toBeUndefined();
+
+    store.setReadOnly(false);
+    store.transact((tx) => tx.add(rect("s1")));
+    expect(store.get(id("s1"))).toBeDefined();
+    expect(calls).toEqual([0, 0, 1]);
+  });
+
   it("loads shapes that were already in the doc", () => {
     const original = new Y.Doc();
     createYDocStore(original).transact((tx) => tx.add(rect("s1", { x: 7 })));
@@ -233,5 +250,41 @@ describe("YDocStore", () => {
     const copy = new Y.Doc();
     Y.applyUpdate(copy, Y.encodeStateAsUpdate(original));
     expect(createYDocStore(copy).get(id("s1"))).toEqual(rect("s1", { x: 7 }));
+  });
+});
+
+describe("countShapes", () => {
+  it("follows adds and removes, local or remote, in any batch", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    store.transact((tx) => tx.add(rect("s1")));
+    const counter = countShapes(doc);
+    expect(counter.count).toBe(1);
+
+    store.transact((tx) => {
+      tx.add(rect("s2"));
+      tx.add(rect("s3"));
+      tx.update(id("s1"), { x: 5 });
+    });
+    expect(counter.count).toBe(3);
+
+    // Added and removed in one batch: never counted.
+    store.transact((tx) => {
+      tx.add(rect("s4"));
+      tx.remove(id("s4"));
+      tx.remove(id("s2"));
+    });
+    expect(counter.count).toBe(2);
+
+    const other = new Y.Doc();
+    Y.applyUpdate(other, Y.encodeStateAsUpdate(doc));
+    createYDocStore(other).transact((tx) => tx.add(rect("s5")));
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(other));
+    expect(counter.count).toBe(3);
+    expect(counter.count).toBe(doc.getMap("shapes").size);
+
+    counter.destroy();
+    store.transact((tx) => tx.add(rect("s6")));
+    expect(counter.count).toBe(3);
   });
 });

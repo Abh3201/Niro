@@ -33,6 +33,11 @@ export interface YDocStoreOptions {
 }
 
 export interface YDocStore extends DocStore {
+  /**
+   * Stops edits, or allows them again: for when the server says the board
+   * takes no more changes (it's full). Listeners are called with no changes.
+   */
+  setReadOnly(readOnly: boolean): void;
   destroy(): void;
 }
 
@@ -50,8 +55,9 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
   const meta = doc.getMap<unknown>("meta");
   if (!options.readOnly) migrate(doc, shapes, meta);
 
+  let refused = false;
   const isReadOnly = () => {
-    if (options.readOnly) return true;
+    if (options.readOnly || refused) return true;
     const version = meta.get("schemaVersion");
     // No version yet: a new board, which the first edit stamps.
     return version !== undefined && (typeof version !== "number" || version > SCHEMA_VERSION);
@@ -155,12 +161,39 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
     },
     canUndo: () => !isReadOnly() && undoManager.canUndo(),
     canRedo: () => !isReadOnly() && undoManager.canRedo(),
+    setReadOnly(readOnly) {
+      if (readOnly === refused) return;
+      refused = readOnly;
+      for (const listener of listeners) listener([], "remote");
+    },
     destroy() {
       undoManager.destroy();
       shapes.unobserveDeep(onDeepChange);
       doc.off("afterTransactionCleanup", onAfterTransaction);
       listeners.clear();
     },
+  };
+}
+
+/**
+ * Counts a board's shapes as it changes, without reading them all each
+ * time: for the realtime server's shape limit. Call `destroy` when done.
+ */
+export function countShapes(doc: Y.Doc): { readonly count: number; destroy(): void } {
+  const shapes = doc.getMap<unknown>("shapes");
+  let count = shapes.size;
+  const onChange = (event: Y.YMapEvent<unknown>) => {
+    for (const change of event.changes.keys.values()) {
+      if (change.action === "add") count++;
+      else if (change.action === "delete") count--;
+    }
+  };
+  shapes.observe(onChange);
+  return {
+    get count() {
+      return count;
+    },
+    destroy: () => shapes.unobserve(onChange),
   };
 }
 

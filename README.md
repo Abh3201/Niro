@@ -2,7 +2,7 @@
 
 An open source, self-hostable whiteboard in the spirit of Miro, and a project for learning, from first principles, how canvas rendering, real-time collaboration and network transports work.
 
-**Status:** P3a (multiplayer). Sticky notes, rectangles, ellipses and lines you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved in each browser and work offline; the server keeps a board only while someone has it open, until P3b adds storage.
+**Status:** P3b (persistence). Sticky notes, rectangles, ellipses and lines you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts.
 
 | To | Do |
 |---|---|
@@ -23,15 +23,19 @@ echo "NIRO_SECRET=$(openssl rand -hex 32)" > .env
 docker compose up --build
 ```
 
-Then open http://localhost:3000. The realtime server listens on http://localhost:8787 (`/healthz`, and WebSockets on `/ws`).
+Then open http://localhost:3000. The realtime server listens on http://localhost:8787: WebSockets on `/ws`, `/healthz`, and `/metrics` in the Prometheus format. Boards are kept in the `pgdata` volume; `docker compose down -v` deletes them.
 
 `NIRO_SECRET` signs share links: keep it private, and keep it the same across restarts, or every link stops working. [`.env.example`](.env.example) lists the other settings:
 
 - `POSTGRES_PASSWORD`: set it before running anywhere other than your own machine.
 - `WEB_PORT` and `REALTIME_PORT`: change the published ports.
 - `PUBLIC_REALTIME_URL`: where browsers open the WebSocket (`ws://` or `wss://`). By default, the web app's host on port 8787. Set it behind a reverse proxy, with HTTPS, or if you change `REALTIME_PORT`.
+- `METRICS_TOKEN`: makes `/metrics` require `Authorization: Bearer <token>`. Set it when port 8787 is reachable from the internet.
+- `NIRO_MAX_SHAPES` (10,000), `NIRO_MAX_BOARD_MB` (20) and `NIRO_MAX_CONNECTIONS_PER_BOARD` (100): limits. A board that reaches the first two turns read-only for everyone, and says so.
 
-How share links work, and what they can't do (revoke one link): [docs/decisions/0002-sharing.md](docs/decisions/0002-sharing.md).
+Run one realtime server per database: two would each compact away the other's writes. Outside Docker it needs `DATABASE_URL`, unless `NODE_ENV` isn't `production`, when it keeps boards in memory.
+
+How share links work, and what they can't do (revoke one link): [docs/decisions/0002-sharing.md](docs/decisions/0002-sharing.md). How boards are stored, and the limits: [docs/decisions/0003-storage.md](docs/decisions/0003-storage.md).
 
 ## Develop
 
@@ -42,7 +46,7 @@ pnpm install
 pnpm dev          # web on http://localhost:5173, realtime on :8787
 ```
 
-In development both servers use a built-in secret; set `NIRO_SECRET` to use your own.
+In development both servers use a built-in secret; set `NIRO_SECRET` to use your own. Without `DATABASE_URL` the realtime server keeps boards in memory, so they last until it restarts (browsers keep their copies). To run the storage tests, point `TEST_DATABASE_URL` at any Postgres: each test works in a schema of its own and drops it.
 
 | Command | What it does |
 |---|---|
@@ -59,7 +63,7 @@ apps/web          React Router v8 app: the board UI and HTTP API
 apps/realtime     WebSocket server: rooms, sync, presence, persistence
 packages/engine   Framework-free canvas engine (no React, no Yjs)
 packages/doc      Document model: shape types, DocStore, z-order and tree rules; Yjs adapter in @niro/doc/yjs
-packages/sync     Realtime sync on Yjs: the server's Room, the browser's SyncClient, share-link keys and tokens
+packages/sync     Realtime sync on Yjs: the server's Room and RoomHost (loading, saving, limits), the browser's SyncClient, share-link keys and tokens
 packages/netsim   Deterministic simulated network for fault-injection tests
 labs/             Learning labs: L2 WebSocket from scratch, L3 own sync, L6 Yjs vs Loro
 docs/decisions    Decision records, with the evidence behind them
@@ -80,8 +84,8 @@ Two rules keep the architecture honest:
 | P0 | Monorepo, web app, realtime stub, Docker compose, CI |
 | P1 | Camera: pan, zoom, pinch, HiDPI, render only when something changed |
 | P2 | Document model and shapes, selection, z-order, undo (after a Yjs vs Loro spike) |
-| **P3a** | Multiplayer: rooms, sync, live cursors, share links |
-| P3b | Persistence, limits, network-fault simulation tests, metrics |
+| P3a | Multiplayer: rooms, sync, live cursors, share links |
+| **P3b** | Persistence, limits, network-fault simulation tests, metrics |
 | P4 | Text, pen, arrows, groups and frames |
 | P5 | Performance: spatial index, culling, level of detail |
 | P6 | v0.1 release |

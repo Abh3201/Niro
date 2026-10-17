@@ -20,10 +20,16 @@ services:
     build:
       context: .
       target: realtime
+    # On stop it writes every open board first; give a slow database time.
+    stop_grace_period: 30s
     environment:
       NIRO_SECRET: ${NIRO_SECRET:?Set NIRO_SECRET in .env first. Make one with openssl rand -hex 32}
-      # Not used until persistence lands in P3b; wired now so the services stay stable.
       DATABASE_URL: postgres://niro:${POSTGRES_PASSWORD:-niro}@postgres:5432/niro
+      # Optional; see .env.example. Empty means the default.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      NIRO_MAX_SHAPES: ${NIRO_MAX_SHAPES:-}
+      NIRO_MAX_BOARD_MB: ${NIRO_MAX_BOARD_MB:-}
+      NIRO_MAX_CONNECTIONS_PER_BOARD: ${NIRO_MAX_CONNECTIONS_PER_BOARD:-}
     ports:
       - "${REALTIME_PORT:-8787}:8787"
     depends_on:

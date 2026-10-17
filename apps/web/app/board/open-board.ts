@@ -36,6 +36,14 @@ export interface OpenBoard {
     get(): SyncStatus;
     subscribe(listener: () => void): () => void;
   };
+  /**
+   * Why the server takes no more changes to this board ("full"), or null.
+   * The store is read-only meanwhile. For `useSyncExternalStore`.
+   */
+  readonly refusal: {
+    get(): string | null;
+    subscribe(listener: () => void): () => void;
+  };
   /** The view key, for editors to share, once known. For `useSyncExternalStore`. */
   readonly viewKey: {
     get(): string | null;
@@ -116,6 +124,9 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
   // A key the server already turned down grants nothing: show what's here, read-only.
   const role = key && client.status !== "denied" ? roleOf(key) : "view";
   const store = createYDocStore(doc, { readOnly: role === "view" });
+  const followServer = () => store.setReadOnly(client.readOnly !== null);
+  followServer();
+  client.subscribe(followServer);
   // The browser knows before the backoff timer that the network is back.
   const onOnline = () => client.reconnectNow();
   window.addEventListener("online", onOnline);
@@ -128,6 +139,10 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
     saved,
     status: {
       get: () => client.status,
+      subscribe: (listener) => client.subscribe(listener),
+    },
+    refusal: {
+      get: () => client.readOnly,
       subscribe: (listener) => client.subscribe(listener),
     },
     viewKey: {

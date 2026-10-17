@@ -16,6 +16,23 @@ jobs:
   check:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+    # For the storage tests (apps/realtime/src/postgres.test.ts), which fail in CI without it.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: niro
+          POSTGRES_PASSWORD: niro
+          POSTGRES_DB: niro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U niro -d niro_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://niro:niro@localhost:5432/niro_test
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
@@ -50,6 +67,10 @@ jobs:
         run: curl -fsSL http://localhost:3000/ | grep -q 'data-testid="board"'
       - name: Realtime server is healthy
         run: curl -fsS http://localhost:8787/healthz | grep -q '"ok"'
+      - name: Realtime server set up its tables and serves metrics
+        run: |
+          docker compose exec -T postgres psql -U niro -d niro -tAc "SELECT max(version) FROM niro_migrations" | grep -qx 1
+          curl -fsS http://localhost:8787/metrics | grep -q '^niro_rooms 0$'
       - if: failure()
         run: docker compose logs
       - if: always()
