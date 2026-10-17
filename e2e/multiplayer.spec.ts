@@ -132,3 +132,81 @@ test("a full board turns read-only for everyone, and says why", async ({ browser
   await alice.context.close();
   await bob.context.close();
 });
+
+test("two people typing in one sticky note at once both keep their text", async ({ browser }) => {
+  const alice = await person(browser);
+  const bob = await person(browser);
+  await openBoard(alice.page);
+  await alice.page.keyboard.press("n");
+  await alice.page.mouse.click(640, 360);
+  await alice.page.keyboard.press("Escape");
+  await join(bob.page, alice.page.url());
+  await expectStatus(bob.page, 1, 0);
+
+  await alice.page.mouse.dblclick(640, 360);
+  await bob.page.mouse.dblclick(640, 360);
+  const aliceEditor = alice.page.getByTestId("text-editor");
+  const bobEditor = bob.page.getByTestId("text-editor");
+  await expect(aliceEditor).toBeFocused();
+  await expect(bobEditor).toBeFocused();
+  // The same characters at the same moment: the hard case for keeping each
+  // person's cursor on their own text.
+  await Promise.all([
+    alice.page.keyboard.type("hello from alice", { delay: 20 }),
+    bob.page.keyboard.type("hello from bob", { delay: 25 }),
+  ]);
+
+  // Each sees the other's typing in their own editor as it happens, and
+  // kept typing where their own cursor was: two whole runs, in an order
+  // the CRDT picks.
+  const both = /^(hello from alicehello from bob|hello from bobhello from alice)$/;
+  await expect(aliceEditor).toHaveValue(both);
+  await expect(bobEditor).toHaveValue(both);
+  expect(await aliceEditor.inputValue()).toBe(await bobEditor.inputValue());
+
+  await alice.context.close();
+  await bob.context.close();
+});
+
+test("text typed with an input method arrives whole, after someone else's typing", async ({
+  browser,
+}) => {
+  const alice = await person(browser);
+  const bob = await person(browser);
+  await openBoard(alice.page);
+  await alice.page.keyboard.press("n");
+  await alice.page.mouse.click(640, 360);
+  await alice.page.keyboard.type("ab");
+  await alice.page.keyboard.press("Escape");
+  await join(bob.page, alice.page.url());
+  await alice.page.mouse.dblclick(640, 360);
+  await bob.page.mouse.dblclick(640, 360);
+  const aliceEditor = alice.page.getByTestId("text-editor");
+  const bobEditor = bob.page.getByTestId("text-editor");
+  await expect(bobEditor).toHaveValue("ab");
+
+  // Alice composes Japanese between "a" and "b", the way an input method
+  // does: the text changes in place until it's committed.
+  await alice.page.keyboard.press("ArrowLeft");
+  const ime = await alice.page.context().newCDPSession(alice.page);
+  await ime.send("Input.imeSetComposition", { text: "に", selectionStart: 1, selectionEnd: 1 });
+  await ime.send("Input.imeSetComposition", { text: "にほ", selectionStart: 2, selectionEnd: 2 });
+  await expect(aliceEditor).toHaveValue("aにほb");
+  // Meanwhile Bob types at the start. Nothing reaches Alice's editor until
+  // she commits, which would break her composition.
+  await bob.page.keyboard.press("Home");
+  await bob.page.keyboard.type("X");
+  // Long enough for Bob's "X" to reach Alice mid-composition, the case
+  // this test is for; if it came later, the test would still pass.
+  await alice.page.waitForTimeout(300);
+  await ime.send("Input.insertText", { text: "日本" });
+
+  await expect(aliceEditor).toHaveValue("Xa日本b");
+  await expect(bobEditor).toHaveValue("Xa日本b");
+  // Her cursor is still right after what she wrote.
+  await alice.page.keyboard.type("!");
+  await expect(bobEditor).toHaveValue("Xa日本!b");
+
+  await alice.context.close();
+  await bob.context.close();
+});

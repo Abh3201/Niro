@@ -11,6 +11,7 @@ const valid = {
   parentId: null,
   index: "a0",
   color: "red",
+  text: "hi",
 };
 
 describe("readShape", () => {
@@ -46,7 +47,14 @@ describe("readShape", () => {
       parentId: null,
       index: "a0",
       color: "green",
+      text: "",
     });
+  });
+
+  it("reads text, and never gives a line any", () => {
+    expect(readShape("s1", { ...valid, type: "text", text: "label" })?.text).toBe("label");
+    expect(readShape("s1", { ...valid, text: 42 })?.text).toBe("");
+    expect(readShape("l1", { ...valid, type: "line", text: "x" })?.text).toBe("");
   });
 
   it("keeps negative width and height on lines, which point either way", () => {

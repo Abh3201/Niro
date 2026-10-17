@@ -56,6 +56,12 @@ export const LineIcon = () => (
   </Icon>
 );
 
+export const TextIcon = () => (
+  <Icon>
+    <path d="M4.5 5V3.5h11V5M10 3.5v13M7.5 16.5h5" />
+  </Icon>
+);
+
 export const UndoIcon = () => (
   <Icon>
     <path d="M7 5L3.5 8.5 7 12" />

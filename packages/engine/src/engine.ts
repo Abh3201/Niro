@@ -1,6 +1,7 @@
 import {
   type ColorName,
   type DocStore,
+  holdsText,
   indexesAbove,
   newShapeId,
   reorderStep,
@@ -26,6 +27,8 @@ import { DARK_PALETTE, drawShape, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
 import { HANDLE_SIZE, placeHandles, type SelectionFrame, selectionFrame } from "./selection";
 import { shapeCenter, shapeOutline } from "./shapes";
+import { canvasFontMetrics, TextLayouts } from "./text";
+import { TextEditor } from "./text-editor";
 import { translate } from "./transform";
 
 export type { ToolName } from "./interaction";
@@ -41,8 +44,13 @@ export interface EngineState {
   readonly shapeCount: number;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
-  /** The board was saved by a newer version of Niro and can't be edited here. */
+  /**
+   * The board can't be edited: the key only grants viewing, the board was
+   * saved by a newer version of Niro, or the server takes no more changes.
+   */
   readonly readOnly: boolean;
+  /** The shape whose text is being edited, if any. */
+  readonly editing: ShapeId | null;
 }
 
 export interface EngineOptions {
@@ -76,6 +84,8 @@ export interface Engine {
   duplicateSelection(): void;
   setSelectionColor(color: ColorName): void;
   reorderSelection(direction: ReorderDirection): void;
+  /** Starts editing a shape's text, in place. Lines have none. */
+  editText(id: ShapeId): void;
   /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
   setPeers(peers: readonly RemotePeer[]): void;
   undo(): void;
@@ -112,6 +122,7 @@ const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
   o: "ellipse",
   n: "sticky",
   l: "line",
+  t: "text",
 };
 
 /**
@@ -145,6 +156,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     canUndo: doc.canUndo(),
     canRedo: doc.canRedo(),
     readOnly: doc.readOnly,
+    editing: null,
   };
   let cameraPlaced = options.camera !== undefined;
   let pixelRatio = window.devicePixelRatio || 1;
@@ -217,10 +229,29 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const selectedShapes = (): Shape[] =>
     state.selection.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
 
+  const fonts = canvasFontMetrics();
+  const layouts = new TextLayouts(fonts.measure);
+  const editor = new TextEditor({
+    container,
+    doc,
+    layouts,
+    camera: () => state.camera,
+    palette: () => theme.palette,
+    changed() {
+      const editing = editor.editing;
+      if (editing !== null && scene.has(editing)) setSelection([editing]);
+      if (editing !== state.editing) setState({ ...state, editing });
+      markDirty(shapes, overlay);
+    },
+    undo: () => undo(),
+    redo: () => redo(),
+  });
+
   const unsubscribeDoc = doc.subscribe((changes) => {
     scene.apply(changes);
     // Editing just stopped (the board filled up): drop any drawing tool.
     if (doc.readOnly && !VIEW_TOOLS.has(state.tool)) setTool("select");
+    if (doc.readOnly) editor.stop();
     const selection = state.selection.filter((id) => scene.has(id));
     setState({
       ...state,
@@ -254,6 +285,12 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     },
     flushWrite,
     overlayChanged: () => markDirty(overlay),
+    startEditing: (id) => editText(id),
+    startDraft(shape) {
+      setSelection([]);
+      editor.start(shape, true);
+    },
+    fittedHeight: (shape) => layouts.fittedHeight(shape),
   };
   const interaction = new Interaction(host);
 
@@ -282,8 +319,18 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       // World -> device pixels: scale by zoom and pixel ratio, shift by the camera.
       const scale = pr * camera.zoom;
       ctx.setTransform(scale, 0, 0, scale, -camera.x * scale, -camera.y * scale);
-      for (const shape of scene.ordered()) drawShape(ctx, shape, theme.palette);
+      const editing = editor.editing;
+      for (const shape of scene.ordered()) {
+        // The editor shows the text of the shape being edited.
+        const text =
+          shape.text === "" || shape.id === editing
+            ? undefined
+            : { layout: layouts.get(shape), baseline: fonts.baseline, zoom: camera.zoom };
+        drawShape(ctx, shape, theme.palette, text);
+      }
       shapes.dirty = false;
+      // Shapes or the camera moved: the editor moves with them.
+      editor.update();
     }
 
     if (overlay.dirty) {
@@ -374,7 +421,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       );
       ctx.setLineDash([]);
     }
-    if (frame && !state.readOnly && !interaction.busy()) {
+    if (frame && !state.readOnly && !interaction.busy() && state.editing === null) {
       ctx.fillStyle = handleFill;
       for (const { target, at } of placeHandles(frame, camera)) {
         ctx.beginPath();
@@ -502,6 +549,13 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     });
   };
 
+  function editText(id: ShapeId) {
+    const shape = scene.get(id);
+    if (!shape || !holdsText(shape.type) || doc.readOnly) return;
+    interaction.cancel();
+    editor.start(shape);
+  }
+
   const nudge = (dx: number, dy: number) => {
     const before = selectedShapes();
     if (before.length === 0 || doc.readOnly) return;
@@ -551,6 +605,12 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     if (event.key === "Delete" || event.key === "Backspace") {
       if (state.selection.length === 0) return false;
       deleteSelection();
+      return true;
+    }
+    if (event.key === "Enter" && !event.shiftKey && state.selection.length === 1) {
+      const id = state.selection[0] as ShapeId;
+      if (!holdsText(scene.get(id)?.type ?? "line")) return false;
+      editText(id);
       return true;
     }
     if (event.code === "BracketRight") {
@@ -620,6 +680,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     toolUp: (pointer) => interaction.pointerUp(pointer),
     toolHover: (pointer) => interaction.hover(pointer),
     toolCancel: () => interaction.cancel(),
+    doubleClick: (pointer) => interaction.doubleClick(pointer),
     keyDown,
     toolCursor: () => interaction.cursor(),
     pointerMoved,
@@ -642,12 +703,14 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     duplicateSelection,
     setSelectionColor,
     reorderSelection,
+    editText,
     setPeers,
     undo,
     redo,
     invalidate: markAllDirty,
     destroy() {
       interaction.cancel();
+      editor.stop();
       input.destroy();
       unsubscribeDoc();
       observer.disconnect();

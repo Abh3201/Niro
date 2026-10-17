@@ -1,5 +1,6 @@
 import type { ColorName, Shape } from "@niro/doc";
 import { shapeCenter } from "./shapes";
+import { FONT_FAMILY, inkColor, LINE_HEIGHT, type TextLayout } from "./text";
 
 export interface Palette {
   /** Shape fills and line strokes. */
@@ -50,9 +51,28 @@ export const DARK_PALETTE: Palette = {
 
 export const LINE_WIDTH = 4;
 const STICKY_SHADOW = "rgba(0, 0, 0, 0.14)";
+/** Text smaller than this on screen, in CSS pixels, is drawn as bars: unreadable anyway, and much cheaper. */
+const GREEK_BELOW_PX = 4;
 
-/** Draws one shape. Expects the context to be transformed to world coordinates. */
-export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, palette: Palette): void {
+/** A shape's text, laid out, and how to draw it. */
+export interface ShapeText {
+  readonly layout: TextLayout;
+  /** `FontMetrics.baseline`. */
+  readonly baseline: number;
+  /** Screen pixels per world unit. */
+  readonly zoom: number;
+}
+
+/**
+ * Draws one shape, and its text when `text` is given. Expects the context
+ * to be transformed to world coordinates.
+ */
+export function drawShape(
+  ctx: CanvasRenderingContext2D,
+  shape: Shape,
+  palette: Palette,
+  text?: ShapeText,
+): void {
   if (shape.type === "line") {
     ctx.strokeStyle = palette.solid[shape.color];
     ctx.lineWidth = LINE_WIDTH;
@@ -89,6 +109,39 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, palette: 
       ctx.fillRect(-w / 2, -h / 2, w, h);
       break;
     }
+    case "text":
+      // Just the text.
+      break;
   }
+  if (text) drawText(ctx, text, inkColor(shape, palette));
   ctx.restore();
+}
+
+/** Draws laid-out text, in the shape's own frame. */
+function drawText(ctx: CanvasRenderingContext2D, text: ShapeText, ink: string): void {
+  const { layout, baseline, zoom } = text;
+  const { fontSize, lines, widths } = layout;
+  const lineHeight = fontSize * LINE_HEIGHT;
+  const left = (i: number) =>
+    layout.align === "left" ? layout.x : layout.x + (layout.width - (widths[i] ?? 0)) / 2;
+  ctx.fillStyle = ink;
+
+  if (fontSize * zoom < GREEK_BELOW_PX) {
+    ctx.globalAlpha = 0.35;
+    lines.forEach((_, i) => {
+      const width = widths[i] ?? 0;
+      if (width > 0)
+        ctx.fillRect(left(i), layout.y + i * lineHeight + fontSize * 0.25, width, fontSize * 0.6);
+    });
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  ctx.font = `${fontSize}px ${FONT_FAMILY}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  lines.forEach((line, i) => {
+    if (line.trim() !== "")
+      ctx.fillText(line, left(i), layout.y + i * lineHeight + baseline * fontSize);
+  });
 }

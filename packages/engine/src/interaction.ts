@@ -1,6 +1,7 @@
 import {
   DEFAULT_COLOR,
   type DocStore,
+  holdsText,
   indexAbove,
   newShapeId,
   type Shape,
@@ -20,6 +21,7 @@ import {
   type SelectionFrame,
   selectionFrame,
 } from "./selection";
+import { DEFAULT_TEXT_WIDTH, TEXT_FONT_SIZE, textHeight, withHeight } from "./text";
 import {
   HANDLE_DIRECTIONS,
   type Handle,
@@ -32,7 +34,7 @@ import {
   translate,
 } from "./transform";
 
-export type ToolName = "select" | "hand" | "rectangle" | "ellipse" | "sticky" | "line";
+export type ToolName = "select" | "hand" | "rectangle" | "ellipse" | "sticky" | "line" | "text";
 
 export interface ToolPointer {
   readonly pointerId: number;
@@ -58,6 +60,12 @@ export interface EditorHost {
   flushWrite(): void;
   /** The marquee, hover or cursor changed: the overlay needs a redraw. */
   overlayChanged(): void;
+  /** Starts editing the text of a shape in the document. */
+  startEditing(id: ShapeId): void;
+  /** Starts editing a new text shape, which goes into the document once something is typed. */
+  startDraft(shape: Shape): void;
+  /** The height a text shape needs for its text. */
+  fittedHeight(shape: Shape): number;
 }
 
 /** Hit tolerance around shapes and lines, in CSS pixels. */
@@ -69,7 +77,10 @@ const DEFAULT_SIZE: Record<Exclude<ShapeType, "line">, { w: number; h: number }>
   rectangle: { w: 160, h: 120 },
   ellipse: { w: 140, h: 140 },
   sticky: { w: 200, h: 200 },
+  text: { w: DEFAULT_TEXT_WIDTH, h: textHeight(1, TEXT_FONT_SIZE) },
 };
+/** Narrowest text shape a drag with the text tool makes, in world units. */
+const MIN_TEXT_WIDTH = 40;
 const DEFAULT_LINE_LENGTH = 160;
 
 type Gesture =
@@ -93,7 +104,15 @@ type Gesture =
     }
   | { kind: "rotate"; start: ToolPointer; pivot: Point; before: Map<ShapeId, Shape> }
   | { kind: "line-end"; start: ToolPointer; end: "start" | "end"; before: Shape }
-  | { kind: "create"; start: ToolPointer; type: ShapeType; id: ShapeId | null };
+  | { kind: "create"; start: ToolPointer; type: ShapeType; id: ShapeId | null }
+  /** The text tool: a click places a text shape, a drag sets its width. `onto` is a text shape clicked to edit it. */
+  | {
+      kind: "text";
+      start: ToolPointer;
+      current: ToolPointer;
+      dragged: boolean;
+      onto: ShapeId | null;
+    };
 
 /**
  * Pointer gestures for the select and shape tools: select, marquee, move,
@@ -111,7 +130,9 @@ export class Interaction {
   /** The marquee rectangle in world coordinates while one is being dragged. */
   marquee(): Box | null {
     const g = this.gesture;
-    return g.kind === "marquee" ? boxFromPoints([g.start.world, g.current]) : null;
+    if (g.kind === "marquee") return boxFromPoints([g.start.world, g.current]);
+    if (g.kind === "text" && g.dragged) return boxFromPoints([g.start.world, g.current.world]);
+    return null;
   }
 
   hovered(): ShapeId | null {
@@ -125,6 +146,7 @@ export class Interaction {
 
   cursor(): string {
     const tool = this.host.tool();
+    if (tool === "text") return "text";
     if (tool !== "select" && tool !== "hand") return "crosshair";
     const g = this.gesture;
     if (g.kind === "move") return "move";
@@ -138,6 +160,12 @@ export class Interaction {
   pointerDown(p: ToolPointer): boolean {
     const tool = this.host.tool();
     if (tool === "hand") return false;
+    if (tool === "text") {
+      const hit = this.host.scene.hit(p.world, HIT_TOLERANCE / this.host.camera().zoom);
+      const onto = hit?.type === "text" ? hit.id : null;
+      this.gesture = { kind: "text", start: p, current: p, dragged: false, onto };
+      return true;
+    }
     if (tool !== "select") {
       this.host.doc.checkpoint();
       this.gesture = { kind: "create", start: p, type: tool, id: null };
@@ -148,9 +176,14 @@ export class Interaction {
 
   pointerMove(p: ToolPointer): void {
     const g = this.gesture;
+    if (g.kind === "text") {
+      g.current = p;
+      g.dragged ||= distance(p.screen, g.start.screen) >= dragThreshold(p);
+      if (g.dragged) this.host.overlayChanged();
+      return;
+    }
     if (g.kind === "pending") {
-      const threshold = p.pointerType === "touch" ? DRAG_THRESHOLD.touch : DRAG_THRESHOLD.mouse;
-      if (distance(p.screen, g.start.screen) < threshold) return;
+      if (distance(p.screen, g.start.screen) < dragThreshold(p)) return;
       if (g.onDrag === "move") this.beginMove(g.start);
       else if (g.onDrag === "marquee")
         this.gesture = {
@@ -171,6 +204,7 @@ export class Interaction {
     this.gesture = { kind: "idle" };
     if (g.kind === "pending") g.onClick?.();
     if (g.kind === "create") this.finishCreate(g, p);
+    if (g.kind === "text") this.finishText(g, p);
     this.host.flushWrite();
     this.hover(p);
   }
@@ -190,6 +224,18 @@ export class Interaction {
     this.host.flushWrite();
     this.host.overlayChanged();
     return true;
+  }
+
+  /**
+   * A double click: edits the text of the shape under the pointer, or starts
+   * a text shape on empty space.
+   */
+  doubleClick(p: ToolPointer): void {
+    const { host } = this;
+    if (host.tool() !== "select" || host.doc.readOnly || this.gesture.kind !== "idle") return;
+    const hit = host.scene.hit(p.world, HIT_TOLERANCE / host.camera().zoom);
+    if (!hit) host.startDraft(this.newShape(newShapeId(), "text", textAt(p.world)));
+    else if (holdsText(hit.type)) host.startEditing(hit.id);
   }
 
   /** Pointer moving with no button down: updates the hover outline and cursor. */
@@ -386,6 +432,30 @@ export class Interaction {
     host.flushWrite();
     host.setSelection([id]);
     host.setTool("select");
+    // Sticky notes are for writing on.
+    if (g.type === "sticky") host.startEditing(id);
+  }
+
+  private finishText(g: Extract<Gesture, { kind: "text" }>, p: ToolPointer): void {
+    const { host } = this;
+    host.setTool("select");
+    if (g.onto && !g.dragged) {
+      host.startEditing(g.onto);
+      return;
+    }
+    let geometry = textAt(g.start.world);
+    if (g.dragged) {
+      // A drag sets where the text starts and how wide it wraps.
+      const from = g.start.world;
+      const width = Math.max(MIN_TEXT_WIDTH, Math.abs(p.world.x - from.x));
+      geometry = {
+        ...geometry,
+        x: Math.min(from.x, p.world.x),
+        y: Math.min(from.y, p.world.y),
+        w: width,
+      };
+    }
+    host.startDraft(this.newShape(newShapeId(), "text", geometry));
   }
 
   private newShape(id: ShapeId, type: ShapeType, geometry: ShapePatch): Shape {
@@ -400,6 +470,7 @@ export class Interaction {
       parentId: null,
       index: indexAbove(this.host.scene.ordered()),
       color: DEFAULT_COLOR[type],
+      text: "",
       ...geometry,
     };
   }
@@ -413,18 +484,29 @@ export class Interaction {
     return result;
   }
 
-  /** Schedules one transaction applying `patch` to every shape in `before`. */
+  /**
+   * Schedules one transaction applying `patch` to every shape in `before`.
+   * A text shape's height follows its text, whatever its new width.
+   */
   private write(before: Map<ShapeId, Shape>, patch: (shape: Shape) => ShapePatch): void {
-    this.host.scheduleWrite(() =>
-      this.host.doc.transact((tx) => {
-        for (const shape of before.values()) tx.update(shape.id, patch(shape));
+    const { host } = this;
+    host.scheduleWrite(() =>
+      host.doc.transact((tx) => {
+        for (const shape of before.values()) {
+          let change = patch(shape);
+          if (shape.type === "text") {
+            const next = { ...shape, ...change };
+            change = { ...change, ...withHeight(next, host.fittedHeight(next)) };
+          }
+          tx.update(shape.id, change);
+        }
       }),
     );
   }
 
   private restore(before: Map<ShapeId, Shape>): void {
     this.write(before, (shape) => {
-      const { id: _id, type: _type, ...fields } = shape;
+      const { id: _id, type: _type, text: _text, ...fields } = shape;
       return fields;
     });
   }
@@ -455,6 +537,15 @@ export function createdGeometry(
     w: Math.max(1, Math.abs(w)),
     h: Math.max(1, Math.abs(h)),
   };
+}
+
+const dragThreshold = (p: ToolPointer) =>
+  p.pointerType === "touch" ? DRAG_THRESHOLD.touch : DRAG_THRESHOLD.mouse;
+
+/** A one-line text shape starting at `at`, its first line centered on it. */
+function textAt(at: Point): ShapePatch {
+  const { w, h } = DEFAULT_SIZE.text;
+  return { x: at.x, y: at.y - h / 2, w, h };
 }
 
 function defaultGeometry(type: ShapeType, center: Point): ShapePatch {

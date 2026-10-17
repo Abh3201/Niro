@@ -16,6 +16,7 @@ export {
   COLORS,
   type ColorName,
   DEFAULT_COLOR,
+  holdsText,
   MIN_SIZE,
   newShapeId,
   normalizeAngle,
@@ -27,5 +28,5 @@ export {
   type ShapePatch,
   type ShapeType,
 } from "./shape";
-export type { DocStore, Origin, ShapeChange, Tx } from "./store";
+export type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
 export { effectiveParents } from "./tree";

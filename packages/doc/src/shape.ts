@@ -1,16 +1,26 @@
 import { nanoid } from "nanoid";
 import { isValidIndex } from "./order";
 
-/** Bumped whenever the stored board format changes. Old boards are migrated on load. */
-export const SCHEMA_VERSION = 1;
+/**
+ * Bumped whenever the stored board format changes. Old boards are migrated
+ * on load; older versions of Niro open newer boards read-only.
+ *
+ * 2: text shapes, and text on rectangles, ellipses and sticky notes.
+ */
+export const SCHEMA_VERSION = 2;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
 
 export const newShapeId = (): ShapeId => nanoid() as ShapeId;
 
-export const SHAPE_TYPES = ["rectangle", "ellipse", "sticky", "line"] as const;
+export const SHAPE_TYPES = ["rectangle", "ellipse", "sticky", "line", "text"] as const;
 export type ShapeType = (typeof SHAPE_TYPES)[number];
+
+/** Shapes that hold text. Lines don't. */
+export function holdsText(type: ShapeType): boolean {
+  return type !== "line";
+}
 
 /**
  * Colors are stored by name, not as hex, so each theme (light, dark) can draw
@@ -33,6 +43,7 @@ export const DEFAULT_COLOR: Record<ShapeType, ColorName> = {
   ellipse: "green",
   sticky: "yellow",
   line: "black",
+  text: "black",
 };
 
 /** Smallest width and height a box shape can have, in world units. */
@@ -41,9 +52,9 @@ export const MIN_SIZE = 1;
 /**
  * A shape on the board.
  *
- * Box shapes (rectangle, ellipse, sticky): `(x, y)` is the top-left corner of
- * the unrotated box, `w` and `h` its size, and `rotation` turns the box around
- * its center.
+ * Box shapes (rectangle, ellipse, sticky, text): `(x, y)` is the top-left
+ * corner of the unrotated box, `w` and `h` its size, and `rotation` turns the
+ * box around its center. A text shape's height follows its text.
  *
  * Lines: `(x, y)` is the start point and `(x + w, y + h)` the end point, so
  * `w` and `h` may be negative. `rotation` is always 0; rotating a line moves
@@ -63,9 +74,16 @@ export interface Shape {
   /** Fractional index: siblings are drawn in `(index, id)` order. */
   readonly index: string;
   readonly color: ColorName;
+  /**
+   * Plain text, `""` when there is none (always, on lines). Stored as a
+   * `Y.Text`, so two people typing in one shape both keep their characters:
+   * change it with `Tx.editText`, never by replacing it.
+   */
+  readonly text: string;
 }
 
-export type ShapePatch = Partial<Omit<Shape, "id" | "type">>;
+/** Fields `Tx.update` can set. Text changes go through `Tx.editText`. */
+export type ShapePatch = Partial<Omit<Shape, "id" | "type" | "text">>;
 
 const TAU = Math.PI * 2;
 
@@ -101,6 +119,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const color = raw.color;
   const index = raw.index;
   const parentId = raw.parentId;
+  const text = raw.text;
 
   return {
     id: id as ShapeId,
@@ -116,5 +135,6 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
       typeof color === "string" && (COLORS as readonly string[]).includes(color)
         ? (color as ColorName)
         : DEFAULT_COLOR[shapeType],
+    text: typeof text === "string" && holdsText(shapeType) ? text : "",
   };
 }
