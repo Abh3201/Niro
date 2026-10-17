@@ -44,7 +44,8 @@ jobs:
       - uses: actions/checkout@v6
       - run: docker compose up --build --wait --wait-timeout 300
       - name: Web app serves the board
-        run: curl -fsS http://localhost:3000/ | grep -q 'data-testid="board"'
+        # "/" redirects to a new board at /b/<id>; -L follows it.
+        run: curl -fsSL http://localhost:3000/ | grep -q 'data-testid="board"'
       - name: Realtime server is healthy
         run: curl -fsS http://localhost:8787/healthz | grep -q '"ok"'
       - if: failure()
