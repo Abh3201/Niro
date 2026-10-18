@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { chromium, expect, test } from "@playwright/test";
 import { frame } from "./frames";
 import { ChatHub } from "./hub";
 import { startServers } from "./server";
@@ -8,7 +9,15 @@ import { startServers } from "./server";
  * server: the Node client in transports.test.ts proves the server, this
  * proves it speaks what a browser speaks. Runs with `pnpm e2e`.
  */
-test("Chromium chats over WebTransport", async ({ page }) => {
+test("Chromium chats over WebTransport", async ({ browserName }, testInfo) => {
+  expect(browserName).toBe("chromium");
+  // DIAGNOSTIC (temporary): own browser with a net log.
+  const netlog = testInfo.outputPath("netlog.json");
+  const browser = await chromium.launch({
+    args: [`--log-net-log=${netlog}`, "--net-log-capture-mode=Everything"],
+  });
+  const page = await browser.newPage();
+  console.log("browser", browser.version());
   const hub = new ChatHub();
   const servers = await startServers(hub);
   try {
@@ -69,6 +78,16 @@ test("Chromium chats over WebTransport", async ({ page }) => {
     expect(received).toEqual(["2 here", "hi"]);
     expect(posted).toEqual(["chromium: hi"]);
   } finally {
+    await browser.close();
     await servers.close();
+    try {
+      const text = readFileSync(netlog, "utf8");
+      for (const line of text.split("\n")) {
+        if (/QUIC|HTTP3|WEB_TRANSPORT|WEBTRANSPORT|error|ERR_/i.test(line))
+          console.log(line.slice(0, 600));
+      }
+    } catch (e) {
+      console.log("no netlog", e);
+    }
   }
 });
