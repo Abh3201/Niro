@@ -169,6 +169,23 @@ describe("YDocStore", () => {
     expect(store.canRedo()).toBe(true);
   });
 
+  it("keeps a held step open across pauses, and ends it when released", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc, { captureTimeout: 2 });
+    store.transact((tx) => tx.add(rect("s1")));
+    const release = store.holdStep();
+    store.transact((tx) => tx.update(id("s1"), { x: 50 }));
+    // The pointer rests. (lib0 holds its own reference to Date.now, so fake timers can't stand in.)
+    for (const until = Date.now() + 10; Date.now() < until; );
+    store.transact((tx) => tx.update(id("s1"), { x: 100 }));
+    release();
+    store.transact((tx) => tx.update(id("s1"), { x: 150 }));
+    store.undo();
+    expect(store.get(id("s1"))?.x).toBe(100);
+    store.undo();
+    expect(store.get(id("s1"))?.x).toBe(0);
+  });
+
   it("reports canUndo correctly from inside a change listener", () => {
     const store = createYDocStore(new Y.Doc());
     const seen: boolean[] = [];

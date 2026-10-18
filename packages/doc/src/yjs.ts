@@ -65,9 +65,10 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
     return version !== undefined && !isKnownVersion(version);
   };
 
+  const captureTimeout = options.captureTimeout ?? 500;
   const undoManager = new Y.UndoManager(shapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
-    captureTimeout: options.captureTimeout ?? 500,
+    captureTimeout,
   });
 
   const cache = new Map<ShapeId, Shape>();
@@ -197,6 +198,19 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
       return () => listeners.delete(listener);
     },
     checkpoint: () => undoManager.stopCapturing(),
+    holdStep() {
+      // UndoManager merges a change into the open step when it comes within
+      // `captureTimeout` of the last; a pointer held still writes nothing.
+      undoManager.stopCapturing();
+      undoManager.captureTimeout = Number.POSITIVE_INFINITY;
+      let held = true;
+      return () => {
+        if (!held) return;
+        held = false;
+        undoManager.captureTimeout = captureTimeout;
+        undoManager.stopCapturing();
+      };
+    },
     undo() {
       if (!isReadOnly()) undoManager.undo();
     },

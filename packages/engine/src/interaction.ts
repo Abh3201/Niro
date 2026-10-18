@@ -193,6 +193,8 @@ type Gesture =
  */
 export class Interaction {
   private gesture: Gesture = { kind: "idle" };
+  /** Ends the undo step the current gesture holds open, if it holds one. */
+  private releaseStep: (() => void) | null = null;
   private hoveredId: ShapeId | null = null;
   private hoverCursor = "";
 
@@ -247,6 +249,20 @@ export class Interaction {
     return selectionFrame(shapes, rotatable);
   }
 
+  /**
+   * Makes everything from now until `endStep` one undo step, so a gesture
+   * the user pauses in the middle of still undoes in one go.
+   */
+  private holdStep(): void {
+    this.endStep();
+    this.releaseStep = this.host.doc.holdStep();
+  }
+
+  private endStep(): void {
+    this.releaseStep?.();
+    this.releaseStep = null;
+  }
+
   /** Returns false when the tool doesn't want this pointer (the input controller then pans). */
   pointerDown(p: ToolPointer): boolean {
     const tool = this.host.tool();
@@ -265,7 +281,7 @@ export class Interaction {
       return true;
     }
     if (tool !== "select") {
-      this.host.doc.checkpoint();
+      this.holdStep();
       const from = tool === "arrow" ? this.attachableAt(p, []) : null;
       this.gesture = { kind: "create", start: p, type: tool, id: null, from, target: null };
       return true;
@@ -312,6 +328,7 @@ export class Interaction {
     if (g.kind === "text") this.finishText(g, p);
     if (g.kind === "draw") this.finishDraw(g);
     this.host.flushWrite();
+    this.endStep();
     // Handles are hidden during a drag: show them again, even if the last
     // write was already drawn.
     if (g.kind !== "pending") this.host.overlayChanged();
@@ -332,6 +349,7 @@ export class Interaction {
     if (g.kind === "marquee") this.host.setSelection(g.base);
     // A cancelled pen stroke was only ever in the overlay.
     this.host.flushWrite();
+    this.endStep();
     this.host.overlayChanged();
     return true;
   }
@@ -392,7 +410,7 @@ export class Interaction {
 
     const handle = frame && !readOnly ? handleAt(frame, host.camera(), p.screen) : null;
     if (frame && handle) {
-      host.doc.checkpoint();
+      this.holdStep();
       // Resizing a frame leaves what's in it where it is (it's written too,
       // since it's stored from the frame's corner, which may move); every
       // other change carries the contents along.
@@ -467,7 +485,7 @@ export class Interaction {
 
   private beginMove(start: ToolPointer): void {
     const { host } = this;
-    host.doc.checkpoint();
+    this.holdStep();
     const units = outermost(host.scene, host.selection());
     // Selected groups are in `before` so a cancelled move puts them back in their frames.
     this.gesture = {
