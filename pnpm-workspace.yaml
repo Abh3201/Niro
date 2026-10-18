@@ -4,4 +4,11 @@ packages:
   - labs/*
 
 onlyBuiltDependencies:
+  # Fetches the prebuilt QUIC library for lab L5's WebTransport server.
+  - '@fails-components/webtransport-transport-http3-quiche'
   - esbuild
+
+# Not needed: buf finds its binary without it, and protobufjs's only prints a notice.
+ignoredBuiltDependencies:
+  - '@bufbuild/buf'
+  - protobufjs

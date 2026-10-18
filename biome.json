@@ -6,7 +6,14 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/build", "!**/dist", "!**/.react-router", "!pnpm-lock.yaml"]
+    "includes": [
+      "**",
+      "!**/build",
+      "!**/dist",
+      "!**/.react-router",
+      "!pnpm-lock.yaml",
+      "!labs/l5-transports/src/gen"
+    ]
   },
   "formatter": {
     "enabled": true,

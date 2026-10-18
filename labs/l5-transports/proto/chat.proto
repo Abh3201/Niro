@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package niro.lab.chat.v1;
+
+// What someone types.
+message Post {
+  string from = 1;
+  string text = 2;
+}
+
+// A post as everyone in the room receives it, numbered by the server.
+message Message {
+  uint64 id = 1;
+  string from = 2;
+  string text = 3;
+  // When the server received it, in milliseconds since 1970.
+  int64 sent_at_ms = 4;
+}
+
+message SendResponse {
+  uint64 id = 1;
+}
+
+message WatchRequest {}
+
+service ChatService {
+  // Both ways on one stream: posts up, messages down. Needs HTTP/2.
+  rpc Talk(stream Post) returns (stream Message);
+  // The same chat for HTTP/1.1: a request per post, and one long response
+  // for the messages.
+  rpc Send(Post) returns (SendResponse);
+  rpc Watch(WatchRequest) returns (stream Message);
+}

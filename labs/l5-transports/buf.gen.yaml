@@ -1,0 +1,6 @@
+# `pnpm generate` writes src/gen from proto/ with protoc-gen-es.
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt: target=ts

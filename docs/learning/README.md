@@ -8,7 +8,7 @@ Each lab in the roadmap ends with a short write-up here, explaining the idea in 
 | L2 | WebSocket from scratch on `node:net`: handshake, frames, masking | [L2-websocket.md](L2-websocket.md) |
 | L3 | Your own last-writer-wins sync over a simulated network | [L3-own-sync.md](L3-own-sync.md) |
 | L4 | Toy CRDTs: LWW-Map with Lamport clocks, RGA for text | [L4-toy-crdts.md](L4-toy-crdts.md) |
-| L5 | One chat app over gRPC, Connect, SSE and WebTransport | _not yet_ |
+| L5 | One chat over WebSocket, SSE, Connect, gRPC and WebTransport: framing, bytes per message, what browsers allow | [L5-transports.md](L5-transports.md) |
 | L6 | What a CRDT stores: Yjs vs Loro, tombstones, movable trees | [L6-yjs-vs-loro.md](L6-yjs-vs-loro.md) |
 | L7 | Decoding a Yjs update by hand: varints, origins, the delete set, where a sticky note's bytes go | [L7-yjs-update.md](L7-yjs-update.md) |
 | L8 | WebGL instanced shape renderer | _not yet_ |

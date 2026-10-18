@@ -76,7 +76,7 @@ packages/engine   Framework-free canvas engine (no React, no Yjs)
 packages/doc      Document model: shape types, DocStore, z-order and tree rules; Yjs adapter in @niro/doc/yjs
 packages/sync     Realtime sync on Yjs: the server's Room and RoomHost (loading, saving, limits), the browser's SyncClient, share-link keys and tokens
 packages/netsim   Deterministic simulated network for fault-injection tests
-labs/             Learning labs: L2 WebSocket from scratch, L3 own sync, L4 toy CRDTs, L6 Yjs vs Loro, L7 decoding a Yjs update
+labs/             Learning labs: L2 WebSocket from scratch, L3 own sync, L4 toy CRDTs, L5 one chat on five transports, L6 Yjs vs Loro, L7 decoding a Yjs update
 docs/decisions    Decision records, with the evidence behind them
 docs/learning     Write-ups from the learning labs
 ```

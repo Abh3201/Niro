@@ -1,0 +1,28 @@
+{
+  "name": "@niro/lab-l5-transports",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lab L5: one chat room over WebSocket, server-sent events, gRPC, Connect and WebTransport, compared.",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "generate": "buf generate"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.16.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0",
+    "@fails-components/webtransport": "1.6.10",
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
+    "ws": "^8.22.0"
+  },
+  "optionalDependencies": {
+    "@fails-components/webtransport-transport-http3-quiche": "1.6.10"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.74.0",
+    "@bufbuild/protoc-gen-es": "2.16.0",
+    "@types/ws": "^8.18.2"
+  }
+}
