@@ -141,6 +141,26 @@ describe("upgrade", () => {
     expect(status).toBe(101);
   });
 
+  it("refuses connections past the server-wide limit, on any board", async () => {
+    await restart({ limits: { connections: 2 } });
+    await h.socket();
+    await h.socket("edit", OTHER_BOARD);
+    expect(await h.upgradeStatus(h.url(h.token("edit", "board-third1"), "board-third1"))).toBe(503);
+    expect(await h.upgradeStatus(h.url(h.token()))).toBe(503);
+    const text = await (await fetch(`http://${h.base}/metrics`)).text();
+    expect(text).toContain('niro_connections_rejected_total{reason="server_full"} 2');
+  });
+
+  it("turns away boards nobody has open once the open ones fill the memory budget", async () => {
+    await restart({ limits: { openBytes: 1000 } });
+    const ws = await h.socket();
+    ws.send(syncStep2(updateOf(2000)));
+    await until(() => h.server.rooms.get(BOARD)?.doc.getMap("m").has("x") === true);
+    // Another board would load: refused. The open one still takes people.
+    expect(await h.upgradeStatus(h.url(h.token("edit", OTHER_BOARD), OTHER_BOARD))).toBe(503);
+    expect(await h.upgradeStatus(h.url(h.token()))).toBe(101);
+  });
+
   it("answers 503 when the board can't be loaded", async () => {
     const failing: BoardStorage = {
       load: () => Promise.reject(new Error("database down")),
@@ -329,12 +349,14 @@ describe("limits", () => {
     expect(await closed).toBe(1007);
   });
 
-  it("start from the plan's values", () => {
+  it("start from the plan's values, with board memory measured since", () => {
     expect(DEFAULT_LIMITS).toEqual({
       messageBytes: 1024 * 1024,
-      documentBytes: 20 * 1024 * 1024,
+      documentBytes: 5 * 1024 * 1024,
       shapes: 10_000,
       connectionsPerRoom: 100,
+      openBytes: 40 * 1024 * 1024,
+      connections: 2_000,
       messagesPerSecond: 200,
       bytesPerSecond: 1024 * 1024,
     });

@@ -37,15 +37,28 @@ export interface Limits {
   /** Largest message, except a connection's first catch-up (sync step 2). */
   messageBytes: number;
   /**
-   * About the largest a board gets before it turns read-only. A catch-up
-   * message may be up to twice this: a client can hold a board slightly over
-   * the limit, and it may have to send all of it after the server lost data.
+   * About the largest a board gets before it turns read-only, as stored. A
+   * catch-up message may be up to twice this: a client can hold a board
+   * slightly over the limit, and it may have to send all of it after the
+   * server lost data. In memory a board takes about 25 times its stored
+   * size (measured with sticky notes: 1,000 of them are 0.28 MB stored and
+   * 8 MB in memory, 10,000 are 3 MB and 67 MB), so 5 MB is about 125 MB.
    */
   documentBytes: number;
   /** Shapes on a board before it turns read-only. */
   shapes: number;
   /** Connections to one board. */
   connectionsPerRoom: number;
+  /**
+   * Stored size of all open boards together. Past it, boards nobody has open
+   * are turned away until some close; open ones keep working. This is the
+   * server's memory budget: about 25 times this, see `documentBytes`.
+   * Checked before a board loads, so boards loading at that moment can take
+   * it over by their own size.
+   */
+  openBytes: number;
+  /** Connections to the whole server. */
+  connections: number;
   /** Messages a connection may send per second, sustained. Bursts of twice that pass. */
   messagesPerSecond: number;
   /** Bytes a connection may send per second, sustained. Bursts of four times that pass. */
@@ -54,9 +67,12 @@ export interface Limits {
 
 export const DEFAULT_LIMITS: Limits = {
   messageBytes: 1024 * 1024,
-  documentBytes: 20 * 1024 * 1024,
+  documentBytes: 5 * 1024 * 1024,
   shapes: 10_000,
   connectionsPerRoom: 100,
+  // About 1 GB of memory.
+  openBytes: 40 * 1024 * 1024,
+  connections: 2_000,
   messagesPerSecond: 200,
   bytesPerSecond: 1024 * 1024,
 };
@@ -96,6 +112,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   const alive = new WeakMap<WebSocket, boolean>();
   /** Connections per board, counted from before the board loads so a crowd can't race past the limit. */
   const connections = new Map<string, number>();
+  /** Every board's count in `connections`, added up. */
+  let connectionCount = 0;
   let closing = false;
 
   const registry = new Registry();
@@ -113,6 +131,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
           "unauthorized",
           "shutting_down",
           "room_full",
+          "server_full",
           "unavailable",
         ].map((reason) => ({ reason })),
       ),
@@ -190,6 +209,14 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     ),
   );
   registry.add(new Sampled("niro_rooms", "gauge", "Boards open in memory.", () => host.rooms.size));
+  registry.add(
+    new Sampled(
+      "niro_open_board_bytes",
+      "gauge",
+      "Stored size of the open boards, an upper bound (see NIRO_MAX_OPEN_MB).",
+      () => host.openBytes,
+    ),
+  );
   registry.add(
     new Sampled("niro_rooms_read_only", "gauge", "Open boards that reached a limit.", () => {
       let count = 0;
@@ -270,9 +297,15 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     if (closing) return refuse("503 Service Unavailable", "shutting_down");
     const count = connections.get(boardId) ?? 0;
     if (count >= limits.connectionsPerRoom) return refuse("503 Service Unavailable", "room_full");
+    if (connectionCount >= limits.connections)
+      return refuse("503 Service Unavailable", "server_full");
+    if (!host.isOpen(boardId) && host.openBytes >= limits.openBytes)
+      return refuse("503 Service Unavailable", "server_full");
 
     connections.set(boardId, count + 1);
+    connectionCount++;
     const unreserve = () => {
+      connectionCount--;
       const left = (connections.get(boardId) ?? 1) - 1;
       if (left > 0) connections.set(boardId, left);
       else connections.delete(boardId);
