@@ -182,7 +182,12 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   });
 
   registry.add(
-    new Sampled("niro_connections", "gauge", "Open WebSocket connections.", () => wss.clients.size),
+    new Sampled(
+      "niro_connections",
+      "gauge",
+      "Open WebSocket connections.",
+      () => editors.clients.size + viewers.clients.size,
+    ),
   );
   registry.add(new Sampled("niro_rooms", "gauge", "Boards open in memory.", () => host.rooms.size));
   registry.add(
@@ -233,7 +238,14 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     res.writeHead(404).end();
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.documentBytes * 2 });
+  // Two servers, because ws checks a message's size only against its server's
+  // `maxPayload`, and buffers the whole message before anyone else sees it.
+  // Editors may send a whole board once, as their catch-up. Viewers' changes
+  // are refused anyway, so nothing they send needs to be bigger than a live
+  // message: past that, ws closes them before buffering more.
+  const editors = new WebSocketServer({ noServer: true, maxPayload: limits.documentBytes * 2 });
+  const viewers = new WebSocketServer({ noServer: true, maxPayload: limits.messageBytes });
+  const clients = () => [...editors.clients, ...viewers.clients];
 
   // Checked before the upgrade, so a refused client costs one HTTP response.
   // Browsers can't read the status, so the client learns of a bad link from
@@ -284,6 +296,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
             unreserve();
           };
           socket.once("close", abandoned);
+          const wss = grant.role === "edit" ? editors : viewers;
           wss.handleUpgrade(req, socket, head, (ws) => {
             upgraded = true;
             socket.off("close", abandoned);
@@ -342,9 +355,10 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       }
       metrics.messagesIn.inc();
       metrics.bytesIn.inc({}, data.length);
-      // The first catch-up can be the whole board: it's exempt from the
-      // size and rate limits. Everything after it is a live change, or cursors.
-      if (!caughtUp && isSyncStep2(data)) {
+      // An editor's first catch-up can be the whole board: it's exempt from
+      // the size and rate limits. Everything after it is a live change, or
+      // cursors. A viewer's catch-up would be refused, so it gets no exemption.
+      if (!caughtUp && role === "edit" && isSyncStep2(data)) {
         caughtUp = true;
       } else if (data.length > limits.messageBytes) {
         // The client reconnects and sends it again as part of its catch-up.
@@ -367,7 +381,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   // A browser that vanished (lid closed, network gone) sends no close frame.
   // Pings find it; the dropped connection then leaves its room.
   const pinger = setInterval(() => {
-    for (const ws of wss.clients) {
+    for (const ws of clients()) {
       if (!alive.get(ws)) {
         metrics.dropped.inc({ reason: "unresponsive" });
         ws.terminate();
@@ -395,8 +409,10 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     async close() {
       closing = true;
       clearInterval(pinger);
-      for (const client of wss.clients) client.close(1001, "server shutting down");
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      for (const client of clients()) client.close(1001, "server shutting down");
+      await Promise.all(
+        [editors, viewers].map((wss) => new Promise<void>((resolve) => wss.close(() => resolve()))),
+      );
       await host.close();
       if (!http.listening) return;
       await new Promise<void>((resolve, reject) =>

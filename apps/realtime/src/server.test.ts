@@ -278,15 +278,24 @@ describe("limits", () => {
   });
 
   it("closes a connection that sends a message over the ceiling, and stays up", async () => {
-    // The ceiling is twice the document limit: 2,000 bytes here.
+    // An editor's ceiling is twice the document limit: 2,000 bytes here.
     await restart({ limits: { documentBytes: 1000 } });
-    const ws = await h.socket("view");
+    const ws = await h.socket("edit");
     const closed = closeCode(ws);
     ws.send(new Uint8Array(3000));
     expect(await closed).toBe(1009);
 
     const a = h.tab();
     await until(() => a.client.status === "online");
+  });
+
+  it("gives a viewer no big catch-up: its ceiling is the live message limit", async () => {
+    await restart({ limits: { messageBytes: 1000 } });
+    const ws = await h.socket("view");
+    const closed = closeCode(ws);
+    ws.send(syncStep2(updateOf(5000)));
+    expect(await closed).toBe(1009);
+    expect(h.server.rooms.get(BOARD)?.doc.getMap("m").has("x") ?? false).toBe(false);
   });
 
   it("closes a connection that sends a flood of messages with 4029", async () => {
