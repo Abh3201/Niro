@@ -1,11 +1,12 @@
 import { createEngine, type Engine } from "@niro/engine";
 import type { SyncStatus } from "@niro/sync";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { currentKey } from "./access";
 import { ExportControls } from "./ExportControls";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
 import { SelectionPanel } from "./SelectionPanel";
+import { ShortcutsHelp, useHelpKey } from "./ShortcutsHelp";
 import { Toolbar } from "./Toolbar";
 import { useEngineState } from "./useEngineState";
 import { ZoomControls } from "./ZoomControls";
@@ -24,6 +25,10 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
   const containerRef = useRef<HTMLDivElement>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [failed, setFailed] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+  useHelpKey(openHelp);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -78,12 +83,13 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
         <>
           <Toolbar engine={session.engine} />
           <SelectionPanel engine={session.engine} />
-          <ZoomControls engine={session.engine} />
+          <ZoomControls engine={session.engine} onHelp={openHelp} />
           <ExportControls engine={session.engine} />
           <PresenceBar boardId={boardId} board={session.board} />
           <BoardStatus engine={session.engine} board={session.board} />
         </>
       )}
+      <ShortcutsHelp open={helpOpen} onClose={closeHelp} />
     </>
   );
 }
@@ -93,6 +99,7 @@ function BoardStatus({ engine, board }: { engine: Engine; board: OpenBoard }) {
   const shapes = useEngineState(engine, (s) => s.shapeCount, 0);
   const selected = useEngineState(engine, (s) => s.selection.length, 0);
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
+  const label = useEngineState(engine, (s) => s.selectionLabel, "");
   const status = useSyncExternalStore<SyncStatus>(
     board.status.subscribe,
     board.status.get,
@@ -115,6 +122,9 @@ function BoardStatus({ engine, board }: { engine: Engine; board: OpenBoard }) {
     <>
       <p className="visually-hidden" role="status" data-testid="board-status">
         {`${shapes} ${shapes === 1 ? "shape" : "shapes"}, ${selected} selected`}
+      </p>
+      <p className="visually-hidden" role="status" data-testid="selection-label">
+        {label}
       </p>
       {notice && (
         <p className="panel notice" role="alert">
