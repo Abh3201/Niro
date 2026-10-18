@@ -17,6 +17,8 @@ docker compose up --build
 
 Open http://localhost:3000. Every visit to `/` makes a new board; its address is the board's edit link. Other machines on your network can use `http://<this machine's address>:3000`. Over plain HTTP the **Copy** buttons in the share panel don't work on other machines (browsers allow the clipboard only on HTTPS and `localhost`), so select the link and copy it by hand.
 
+No server of your own? [deploy-azure.md](deploy-azure.md) runs a small demo on Azure App Service's free tier.
+
 ## Put it on a server, with HTTPS
 
 [`compose.https.yml`](../compose.https.yml) adds [Caddy](https://caddyserver.com) in front of both services. Caddy gets a certificate from Let's Encrypt, sends the board's WebSocket (`/ws`) to the realtime server and everything else to the web app, all on one domain. Only Caddy is published; the web app, the realtime server's `/healthz` and `/metrics`, and Postgres stay inside the compose network.
