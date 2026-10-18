@@ -1,0 +1,36 @@
+# HTTPS for a public server: Caddy in front of both services, on one domain.
+#
+#   NIRO_DOMAIN=board.example.com in .env, DNS pointing at this machine, then
+#   docker compose -f docker-compose.yml -f compose.https.yml up --build -d
+#
+# See docs/self-hosting.md.
+services:
+  web:
+    # Only Caddy reaches the services.
+    ports: !reset []
+    environment:
+      PUBLIC_REALTIME_URL: wss://${NIRO_DOMAIN:?Set NIRO_DOMAIN in .env first}
+  realtime:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      NIRO_DOMAIN: ${NIRO_DOMAIN:?Set NIRO_DOMAIN in .env first}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates; keep this volume or Let's Encrypt rate limits bite.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - realtime
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -84,6 +84,14 @@ jobs:
         run: |
           docker compose exec -T postgres psql -U niro -d niro -tAc "SELECT max(version) FROM niro_migrations" | grep -qx 1
           curl -fsS http://localhost:8787/metrics | grep -q '^niro_rooms 0$'
+      - name: The HTTPS setup from docs/self-hosting.md serves the board through Caddy
+        # For localhost, Caddy uses a certificate of its own (-k), not Let's Encrypt.
+        run: |
+          echo "NIRO_DOMAIN=localhost" >> .env
+          echo "COMPOSE_FILE=docker-compose.yml:compose.https.yml" >> .env
+          docker compose up -d --wait --wait-timeout 120
+          curl -fsSkL --retry 10 --retry-all-errors --retry-delay 2 https://localhost/ | grep -q 'data-testid="board"'
+          curl -sSk -o /dev/null -w '%{http_code}' https://localhost/metrics | grep -qx 404
       - if: failure()
         run: docker compose logs
       - if: always()
