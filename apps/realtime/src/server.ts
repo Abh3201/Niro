@@ -247,8 +247,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       metrics.rejected.inc({ reason });
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
     };
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== "/ws") return refuse("404 Not Found", "not_found");
+    const url = requestUrl(req);
+    if (url?.pathname !== "/ws") return refuse("404 Not Found", "not_found");
     if (url.searchParams.get("v") !== String(PROTOCOL_VERSION))
       return refuse("400 Bad Request", "bad_request");
     const boardId = url.searchParams.get("board") ?? "";
@@ -434,6 +434,15 @@ function bearerMatches(req: IncomingMessage, token: string): boolean {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-function pathname(req: IncomingMessage): string {
-  return new URL(req.url ?? "/", "http://localhost").pathname;
+/**
+ * The request's URL, or null if it doesn't parse. A request line like
+ * `GET //[ HTTP/1.1` passes Node's parser but makes `new URL` throw, and a
+ * throw in these handlers would take the whole server down.
+ */
+function requestUrl(req: IncomingMessage): URL | null {
+  return URL.parse(req.url ?? "/", "http://localhost");
+}
+
+function pathname(req: IncomingMessage): string | undefined {
+  return requestUrl(req)?.pathname;
 }

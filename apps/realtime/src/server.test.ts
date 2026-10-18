@@ -62,6 +62,28 @@ describe("HTTP", () => {
     expect(res.status).toBe(404);
   });
 
+  it("stays up after request targets that aren't valid URLs", async () => {
+    const [host, port] = h.base.split(":") as [string, string];
+    for (const upgrade of [false, true]) {
+      const socket = connect(Number(port), host);
+      await new Promise((resolve) => socket.once("connect", resolve));
+      const response = new Promise<string>((resolve) => {
+        socket.once("data", (data) => resolve(String(data)));
+      });
+      socket.write(
+        `GET //[ HTTP/1.1\r\nHost: ${h.base}\r\n` +
+          (upgrade
+            ? "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+            : "") +
+          "\r\n",
+      );
+      expect(await response).toMatch(/^HTTP\/1\.1 404/);
+      socket.destroy();
+    }
+    const res = await fetch(`http://${h.base}/healthz`);
+    expect(res.status).toBe(200);
+  });
+
   it("serves metrics in the Prometheus text format", async () => {
     const a = h.tab();
     await until(() => a.client.status === "online");
