@@ -210,6 +210,28 @@ describe("YDocStore", () => {
     expect(Y.decodeStateVector(Y.encodeStateVector(doc)).has(doc.clientID)).toBe(false);
   });
 
+  it("upgrades an older board that arrives after the store was created, on the next edit", () => {
+    const older = new Y.Doc();
+    older.getMap("meta").set("schemaVersion", SCHEMA_VERSION - 1);
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(older));
+    store.transact((tx) => tx.add(rect("s1")));
+    expect(doc.getMap("meta").get("schemaVersion")).toBe(SCHEMA_VERSION);
+    store.undo();
+    expect(doc.getMap("meta").get("schemaVersion")).toBe(SCHEMA_VERSION);
+  });
+
+  it("opens a board with a version that isn't a whole number from 1 up read-only, without hanging", () => {
+    for (const version of [-1e300, -1, 0, 2.5, Number.NaN]) {
+      const doc = new Y.Doc();
+      doc.getMap("meta").set("schemaVersion", version);
+      const store = createYDocStore(doc);
+      expect(store.readOnly).toBe(true);
+      expect(doc.getMap("meta").get("schemaVersion")).toBe(version);
+    }
+  });
+
   it("a view-only store ignores edits and writes nothing", () => {
     const doc = new Y.Doc();
     const store = createYDocStore(doc, { readOnly: true });

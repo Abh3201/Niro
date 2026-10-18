@@ -62,7 +62,7 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
     if (options.readOnly || refused) return true;
     const version = meta.get("schemaVersion");
     // No version yet: a new board, which the first edit stamps.
-    return version !== undefined && (typeof version !== "number" || version > SCHEMA_VERSION);
+    return version !== undefined && !isKnownVersion(version);
   };
 
   const undoManager = new Y.UndoManager(shapes, {
@@ -183,6 +183,10 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
     all: () => cache.values(),
     transact(fn) {
       if (isReadOnly()) return;
+      // The stored board may have arrived after the store was created (a
+      // slow first sync). Bring its version up first, in a transaction of
+      // its own so undo never reverts it.
+      migrate(doc, shapes, meta);
       doc.transact(() => {
         if (!meta.has("schemaVersion")) meta.set("schemaVersion", SCHEMA_VERSION);
         fn(tx);
@@ -237,11 +241,22 @@ export function countShapes(doc: Y.Doc): { readonly count: number; destroy(): vo
   };
 }
 
+/**
+ * A schema version this code can read: a whole number from 1 to the
+ * current one. Anything else came from a newer client or a broken one, and
+ * the store stays read-only rather than loop from, say, -1e300 upwards.
+ */
+function isKnownVersion(version: unknown): version is number {
+  return (
+    Number.isInteger(version) && (version as number) >= 1 && (version as number) <= SCHEMA_VERSION
+  );
+}
+
 function migrate(doc: Y.Doc, shapes: Y.Map<YShape>, meta: Y.Map<unknown>): void {
   const stored = meta.get("schemaVersion");
   // No version: a new board, stamped by its first edit. A newer or unreadable
   // version: leave the board alone; the store is read-only.
-  if (typeof stored !== "number" || stored >= SCHEMA_VERSION) return;
+  if (!isKnownVersion(stored) || stored === SCHEMA_VERSION) return;
   let version = stored;
   doc.transact(() => {
     for (; version < SCHEMA_VERSION; version++) MIGRATIONS[version]?.(shapes);
