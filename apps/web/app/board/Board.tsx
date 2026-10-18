@@ -2,6 +2,7 @@ import { createEngine, type Engine } from "@niro/engine";
 import type { SyncStatus } from "@niro/sync";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { currentKey } from "./access";
+import { ExportControls } from "./ExportControls";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
 import { SelectionPanel } from "./SelectionPanel";
@@ -78,6 +79,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
           <Toolbar engine={session.engine} />
           <SelectionPanel engine={session.engine} />
           <ZoomControls engine={session.engine} />
+          <ExportControls engine={session.engine} />
           <PresenceBar boardId={boardId} board={session.board} />
           <BoardStatus engine={session.engine} board={session.board} />
         </>

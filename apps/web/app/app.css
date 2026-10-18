@@ -146,6 +146,14 @@ body {
   bottom: 16px;
 }
 
+.export-controls {
+  position: fixed;
+  right: 16px;
+  bottom: 70px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .notice {
   position: fixed;
   bottom: 16px;
