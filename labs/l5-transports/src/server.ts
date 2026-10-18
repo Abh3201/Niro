@@ -36,6 +36,12 @@ export async function startServers(hub: ChatHub): Promise<Servers> {
   const connect = connectNodeAdapter({ routes: chatRoutes(hub) });
 
   const http1 = createHttp1Server((req, res) => {
+    // A blank page for browser tests to start from: see browser.spec.ts.
+    if (req.url === "/" && req.method === "GET") {
+      return void res
+        .writeHead(200, { "content-type": "text/html" })
+        .end("<!doctype html><title>L5</title>");
+    }
     if (req.url === "/events" && req.method === "GET") return serveEvents(hub, req, res);
     if (req.url === "/send" && req.method === "POST") return void servePost(hub, req, res);
     connect(req, res);

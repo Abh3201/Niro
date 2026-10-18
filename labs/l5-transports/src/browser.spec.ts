@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { chromium, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { frame } from "./frames";
 import { ChatHub } from "./hub";
 import { startServers } from "./server";
@@ -9,15 +8,7 @@ import { startServers } from "./server";
  * server: the Node client in transports.test.ts proves the server, this
  * proves it speaks what a browser speaks. Runs with `pnpm e2e`.
  */
-test("Chromium chats over WebTransport", async ({ browserName }, testInfo) => {
-  expect(browserName).toBe("chromium");
-  // DIAGNOSTIC (temporary): own browser with a net log.
-  const netlog = testInfo.outputPath("netlog.json");
-  const browser = await chromium.launch({
-    args: [`--log-net-log=${netlog}`, "--net-log-capture-mode=Everything"],
-  });
-  const page = await browser.newPage();
-  console.log("browser", browser.version());
+test("Chromium chats over WebTransport", async ({ page }) => {
   const hub = new ChatHub();
   const servers = await startServers(hub);
   try {
@@ -28,11 +19,11 @@ test("Chromium chats over WebTransport", async ({ browserName }, testInfo) => {
     }
     const posted: string[] = [];
     hub.listen((m) => posted.push(`${m.from}: ${m.text}`));
-    // WebTransport needs a secure context; http://127.0.0.1 is one.
-    await page.route("**/page", (route) =>
-      route.fulfill({ contentType: "text/html", body: "<!doctype html><title>L5</title>" }),
-    );
-    await page.goto(`${servers.http1}/page`);
+    // WebTransport needs a secure context; http://127.0.0.1 is one. The page
+    // must really come from 127.0.0.1: Chrome's Local Network Access checks
+    // block a page it counts as public (one Playwright makes up with
+    // page.route, say) from opening WebTransport to a loopback address.
+    await page.goto(`${servers.http1}/`);
     const received = await page.evaluate(
       async ({ url, hash, join, post }) => {
         const transport = new WebTransport(url, {
@@ -78,16 +69,6 @@ test("Chromium chats over WebTransport", async ({ browserName }, testInfo) => {
     expect(received).toEqual(["2 here", "hi"]);
     expect(posted).toEqual(["chromium: hi"]);
   } finally {
-    await browser.close();
     await servers.close();
-    try {
-      const text = readFileSync(netlog, "utf8");
-      for (const line of text.split("\n")) {
-        if (/QUIC|HTTP3|WEB_TRANSPORT|WEBTRANSPORT|error|ERR_/i.test(line))
-          console.log(line.slice(0, 600));
-      }
-    } catch (e) {
-      console.log("no netlog", e);
-    }
   }
 });
