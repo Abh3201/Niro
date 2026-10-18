@@ -195,6 +195,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
     optionalDependencies:
       '@fails-components/webtransport-transport-http3-quiche':
         specifier: 1.6.10

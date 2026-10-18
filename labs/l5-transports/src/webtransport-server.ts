@@ -24,7 +24,7 @@ export interface WebTransportServer {
    * for WebTransport only by this hash (`serverCertificateHashes`), and only
    * if it's ECDSA and valid for at most 14 days.
    */
-  readonly certificateHash: Uint8Array;
+  readonly certificateHash: Uint8Array<ArrayBuffer>;
   close(): Promise<void>;
 }
 
@@ -107,7 +107,7 @@ async function serveSession(hub: ChatHub, session: WebTransportSession) {
 }
 
 /** A throwaway ECDSA P-256 certificate for 127.0.0.1, valid for 10 days, made with openssl. */
-function makeCertificate(): { cert: string; key: string; hash: Uint8Array } | null {
+function makeCertificate(): { cert: string; key: string; hash: Uint8Array<ArrayBuffer> } | null {
   const dir = mkdtempSync(join(tmpdir(), "niro-l5-"));
   try {
     execFileSync(

@@ -275,7 +275,7 @@ export async function openGrpcJs(http2: string, name: string): Promise<ChatClien
 /** WebTransport: one HTTP/3 stream each way, over QUIC. */
 export async function openWebTransport(
   url: string,
-  certificateHash: Uint8Array,
+  certificateHash: Uint8Array<ArrayBuffer>,
   name: string,
 ): Promise<ChatClient> {
   const { WebTransport, quicheLoaded } = await import("@fails-components/webtransport");

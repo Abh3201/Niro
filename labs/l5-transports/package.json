@@ -23,6 +23,7 @@
   "devDependencies": {
     "@bufbuild/buf": "1.74.0",
     "@bufbuild/protoc-gen-es": "2.16.0",
-    "@types/ws": "^8.18.2"
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
   }
 }
