@@ -40,6 +40,15 @@ export function shapeBounds(shape: Shape): Box {
   return boxFromPoints(shapeOutline(shape));
 }
 
+/**
+ * The box a shape can be hit or selected in: its outline's box, and for a
+ * frame the band above it where its name is picked.
+ */
+export function shapeExtent(shape: Shape): Box {
+  const box = shapeBounds(shape);
+  return shape.type === "frame" ? { ...box, minY: box.minY - FRAME_LABEL_HEIGHT } : box;
+}
+
 /** `p` in the shape's own frame: origin at its center, axes along its unrotated sides. */
 export function toShapeFrame(shape: Shape, p: Point): Point {
   const c = shapeCenter(shape);

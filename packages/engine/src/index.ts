@@ -1,3 +1,4 @@
+export { benchmarkBoard } from "./bench-board";
 export * from "./camera";
 export { backingStoreSize } from "./canvas";
 export {
@@ -5,6 +6,7 @@ export {
   type Engine,
   type EngineOptions,
   type EngineState,
+  type FrameStats,
   type ReorderDirection,
   type ToolName,
 } from "./engine";

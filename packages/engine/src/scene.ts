@@ -6,11 +6,32 @@ import {
   type ShapeChange,
   type ShapeId,
 } from "@niro/doc";
+import RBush from "rbush";
 import { resolveArrow } from "./arrows";
 import { type Box, type Point, unionBoxes } from "./geometry";
-import { hitShape, shapeBounds, shapeIntersectsBox, toShapeFrame } from "./shapes";
+import { hitShape, shapeBounds, shapeExtent, shapeIntersectsBox, toShapeFrame } from "./shapes";
 
 const NO_FRAMES: readonly ShapeId[] = [];
+
+/** A shape's entry in the spatial index. */
+interface Indexed {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  readonly id: ShapeId;
+}
+
+export interface SceneOptions {
+  /**
+   * The box a shape covers when drawn: its outline, plus whatever is drawn
+   * past it (line caps, shadows, text that spills out, a frame's name). The
+   * spatial index uses it, so anything outside it may be left undrawn.
+   * It must hold `shapeExtent`, or hit tests would miss. By default, it is
+   * `shapeExtent`.
+   */
+  extent?: (shape: Shape) => Box;
+}
 
 /**
  * The engine's read model of the document: every shape, the tree that groups
@@ -24,8 +45,11 @@ const NO_FRAMES: readonly ShapeId[] = [];
  * what's in it.
  *
  * Shapes are drawn depth first: each shape, then what's in it, siblings in
- * `(index, id)` order. Hit testing and marquee selection scan every shape;
- * P5 replaces the scans with a spatial index.
+ * `(index, id)` order.
+ *
+ * An R-tree (rbush) holds every shape's drawn box, so drawing, hit testing
+ * and marquee selection look only at shapes near where they're looking,
+ * then put them in draw order by each shape's place in it.
  */
 export class Scene {
   /** Shapes as stored. */
@@ -41,8 +65,16 @@ export class Scene {
   private order: Shape[] | null = null;
   /** For each shape inside frames, those frames, outermost first. */
   private frames = new Map<ShapeId, readonly ShapeId[]>();
+  /** Each shape's place in `order`. */
+  private ranks: Map<ShapeId, number> | null = null;
+  private readonly tree = new RBush<Indexed>();
+  private readonly indexed = new Map<ShapeId, Indexed>();
+  /** Shapes drawn differently since the index was last brought up to date. */
+  private readonly unindexed = new Set<ShapeId>();
+  private readonly extent: (shape: Shape) => Box;
 
-  constructor(doc: DocStore) {
+  constructor(doc: DocStore, options: SceneOptions = {}) {
+    this.extent = options.extent ?? shapeExtent;
     this.apply([...doc.all()].map((shape) => ({ kind: "added" as const, shape })));
   }
 
@@ -56,6 +88,7 @@ export class Scene {
         const { id } = change.previous;
         this.stored.delete(id);
         this.shapes.delete(id);
+        this.unindexed.add(id);
         structural = true;
         continue;
       }
@@ -75,12 +108,14 @@ export class Scene {
       this.rebuildTree();
       this.placeAll();
       this.order = null;
+      this.ranks = null;
     } else {
       this.place(changed);
       // A drag changes positions, not the order: swap in the new snapshots
       // instead of walking the tree again on every frame.
       this.order &&= this.order.map((shape) => this.shapes.get(shape.id) ?? shape);
     }
+    this.reindex();
   }
 
   get(id: ShapeId): Shape | undefined {
@@ -162,6 +197,34 @@ export class Scene {
     return this.order;
   }
 
+  /** Shapes whose drawn box overlaps `box`, in draw order: what to draw for a view of `box`. */
+  visible(box: Box): Shape[] {
+    const order = this.ordered();
+    const found = this.tree.search(box);
+    if (found.length === order.length) return [...order];
+    const ranks = this.rankMap();
+    const marked = new Uint8Array(order.length);
+    for (const entry of found) {
+      const rank = ranks.get(entry.id);
+      if (rank !== undefined) marked[rank] = 1;
+    }
+    const result: Shape[] = [];
+    for (let i = 0; i < order.length; i++) if (marked[i]) result.push(order[i] as Shape);
+    return result;
+  }
+
+  /** Shapes whose drawn box overlaps `box`, topmost first. For looking at a few shapes. */
+  private near(box: Box): Shape[] {
+    const order = this.ordered();
+    const ranks = this.rankMap();
+    const found: number[] = [];
+    for (const entry of this.tree.search(box)) {
+      const rank = ranks.get(entry.id);
+      if (rank !== undefined) found.push(rank);
+    }
+    return found.sort((a, b) => b - a).map((rank) => order[rank] as Shape);
+  }
+
   /**
    * The topmost shape under `p` that `accept` takes (any, by default). Parts
    * of shapes cut off by the frames they're in can't be hit, and the inside
@@ -169,9 +232,13 @@ export class Scene {
    * there is on the frame's surface, like the board's.
    */
   hit(p: Point, tolerance: number, accept?: (shape: Shape) => boolean): Shape | undefined {
-    const order = this.ordered();
-    for (let i = order.length - 1; i >= 0; i--) {
-      const shape = order[i] as Shape;
+    const around = {
+      minX: p.x - tolerance,
+      minY: p.y - tolerance,
+      maxX: p.x + tolerance,
+      maxY: p.y + tolerance,
+    };
+    for (const shape of this.near(around)) {
       if (hitShape(shape, p, tolerance)) {
         if ((!accept || accept(shape)) && this.visibleAt(shape.id, p)) return shape;
       } else if (shape.type === "frame" && inside(shape, p) && this.visibleAt(shape.id, p)) {
@@ -186,9 +253,7 @@ export class Scene {
    * frame), other than those in `exclude`: where a shape put at `p` belongs.
    */
   frameAt(p: Point, exclude: ReadonlySet<ShapeId> = new Set()): ShapeId | null {
-    const order = this.ordered();
-    for (let i = order.length - 1; i >= 0; i--) {
-      const shape = order[i] as Shape;
+    for (const shape of this.near({ minX: p.x, minY: p.y, maxX: p.x, maxY: p.y })) {
       if (shape.type !== "frame" || exclude.has(shape.id)) continue;
       if (inside(shape, p) && this.visibleAt(shape.id, p)) return shape.id;
     }
@@ -197,7 +262,79 @@ export class Scene {
 
   /** Every shape overlapping `box`, in draw order. Groups overlap where what's in them does. */
   inBox(box: Box): Shape[] {
-    return this.ordered().filter((shape) => shapeIntersectsBox(shape, box));
+    return this.visible(box).filter((shape) => shapeIntersectsBox(shape, box));
+  }
+
+  private rankMap(): Map<ShapeId, number> {
+    if (!this.ranks) {
+      const ranks = new Map<ShapeId, number>();
+      this.ordered().forEach((shape, i) => {
+        ranks.set(shape.id, i);
+      });
+      this.ranks = ranks;
+    }
+    return this.ranks;
+  }
+
+  /** Records how `shape` is drawn now. */
+  private draw(shape: Shape): void {
+    const before = this.shapes.get(shape.id);
+    this.shapes.set(shape.id, shape);
+    // Placing everything again (after any change to the tree) mostly puts
+    // shapes back where they were: those keep their place in the index.
+    if (
+      before &&
+      before.x === shape.x &&
+      before.y === shape.y &&
+      before.w === shape.w &&
+      before.h === shape.h &&
+      before.rotation === shape.rotation &&
+      before.text === shape.text
+    )
+      return;
+    this.unindexed.add(shape.id);
+  }
+
+  /** Brings the index up to date with how shapes are now drawn. */
+  private reindex(): void {
+    if (this.unindexed.size === 0) return;
+    // Most of the board changed (it just loaded): build the tree in one go.
+    if (this.unindexed.size > this.indexed.size / 2) {
+      this.tree.clear();
+      this.indexed.clear();
+      const entries: Indexed[] = [];
+      for (const shape of this.shapes.values()) {
+        const entry = { ...this.extent(shape), id: shape.id };
+        this.indexed.set(shape.id, entry);
+        entries.push(entry);
+      }
+      this.tree.load(entries);
+      this.unindexed.clear();
+      return;
+    }
+    for (const id of this.unindexed) {
+      const shape = this.shapes.get(id);
+      const entry = this.indexed.get(id);
+      if (!shape) {
+        if (entry) this.tree.remove(entry);
+        this.indexed.delete(id);
+        continue;
+      }
+      const box = this.extent(shape);
+      if (
+        entry &&
+        entry.minX === box.minX &&
+        entry.minY === box.minY &&
+        entry.maxX === box.maxX &&
+        entry.maxY === box.maxY
+      )
+        continue;
+      if (entry) this.tree.remove(entry);
+      const next = { ...box, id };
+      this.indexed.set(id, next);
+      this.tree.insert(next);
+    }
+    this.unindexed.clear();
   }
 
   /** True when `p` isn't cut off by any frame shape `id` is in. */
@@ -228,7 +365,7 @@ export class Scene {
         const shape = this.stored.get(id);
         if (!shape) continue;
         if (shape.type === "arrow") arrows.push(shape);
-        else if (shape.type !== "group") this.shapes.set(id, this.onBoard(shape));
+        else if (shape.type !== "group") this.draw(this.onBoard(shape));
         walk(id);
         // After what's in them: inner groups are fitted first.
         if (shape.type === "group") groups.push(id);
@@ -251,8 +388,7 @@ export class Scene {
     const depth = (id: ShapeId) => this.framesAround(id).length;
     for (const id of [...moved].sort((a, b) => depth(a) - depth(b))) {
       const shape = this.stored.get(id);
-      if (shape && shape.type !== "arrow" && shape.type !== "group")
-        this.shapes.set(id, this.onBoard(shape));
+      if (shape && shape.type !== "arrow" && shape.type !== "group") this.draw(this.onBoard(shape));
     }
     const arrows = new Set<ShapeId>();
     for (const id of moved) {
@@ -268,10 +404,7 @@ export class Scene {
   }
 
   private placeArrow(arrow: Shape): void {
-    this.shapes.set(
-      arrow.id,
-      resolveArrow(this.onBoard(arrow), (target) => this.shapes.get(target)),
-    );
+    this.draw(resolveArrow(this.onBoard(arrow), (target) => this.shapes.get(target)));
   }
 
   private rebuildTree(): void {
@@ -327,8 +460,7 @@ export class Scene {
         boxes.push(shapeBounds(shape));
     }
     const box = unionBoxes(boxes);
-    this.shapes.set(
-      id,
+    this.draw(
       box
         ? { ...group, x: box.minX, y: box.minY, w: box.maxX - box.minX, h: box.maxY - box.minY }
         : { ...group, w: 0, h: 0 },

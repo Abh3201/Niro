@@ -1,4 +1,4 @@
-import type { Shape, ShapePatch } from "@niro/doc";
+import type { Shape, ShapeId, ShapePatch } from "@niro/doc";
 import type { Palette } from "./render";
 
 /**
@@ -269,20 +269,24 @@ export function canvasFontMetrics(): FontMetrics {
   };
 }
 
-/** Remembers layouts by shape size and text, so a frame that changed nothing measures nothing. */
+/**
+ * Remembers each shape's layout, so a frame that changed nothing measures
+ * nothing. One entry per shape: a board's worth always fits (a cache
+ * smaller than the board would be emptied and refilled on every frame).
+ */
 export class TextLayouts {
-  private readonly cache = new Map<string, TextLayout>();
+  private readonly cache = new Map<ShapeId, { key: string; layout: TextLayout }>();
 
   constructor(private readonly measure: MeasureText) {}
 
   get(shape: Shape): TextLayout {
     const key = `${shape.type}|${shape.w}|${shape.h}|${shape.text}`;
-    let layout = this.cache.get(key);
-    if (!layout) {
-      layout = layoutText(shape, this.measure);
-      if (this.cache.size >= 5_000) this.cache.clear();
-      this.cache.set(key, layout);
-    }
+    const cached = this.cache.get(shape.id);
+    if (cached?.key === key) return cached.layout;
+    const layout = layoutText(shape, this.measure);
+    // Deleted shapes are never evicted one by one: forget everything now and then.
+    if (!cached && this.cache.size >= 100_000) this.cache.clear();
+    this.cache.set(shape.id, { key, layout });
     return layout;
   }
 

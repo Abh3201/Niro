@@ -14,7 +14,8 @@
     "lint:fix": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "bench": "playwright test -c apps/bench/playwright.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

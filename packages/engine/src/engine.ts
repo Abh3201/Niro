@@ -14,6 +14,7 @@ import {
   centerOn,
   nextZoomStep,
   screenToWorld,
+  visibleBounds,
   worldToScreen,
   zoomAt,
 } from "./camera";
@@ -24,7 +25,7 @@ import { InputController } from "./input";
 import { type EditorHost, Interaction, type ToolName } from "./interaction";
 import { Layer } from "./layers";
 import { type RemotePeer, SmoothedCursors } from "./presence";
-import { DARK_PALETTE, drawShape, LIGHT_PALETTE, type Palette } from "./render";
+import { DARK_PALETTE, drawnExtent, drawShape, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
 import { HANDLE_SIZE, placeHandles } from "./selection";
 import { shapeCenter, shapeOutline } from "./shapes";
@@ -85,6 +86,19 @@ export interface EngineOptions {
    * For showing this user's cursor to others.
    */
   onPointerMove?: (world: Point | null) => void;
+  /**
+   * Called after every frame the engine draws: for benchmarks and
+   * debugging. Drawing commands are queued in that time; the browser may
+   * rasterize them later, off the main thread.
+   */
+  onFrame?: (stats: FrameStats) => void;
+}
+
+export interface FrameStats {
+  /** Time spent in the frame's JavaScript, in ms. */
+  readonly ms: number;
+  /** Shapes drawn: none when only the overlay changed, fewer than all when some were off screen. */
+  readonly drawn: number;
 }
 
 export type ReorderDirection = "forward" | "backward" | "front" | "back";
@@ -175,7 +189,25 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const overlay = new Layer(container, "overlay");
   const layers = [background, shapes, overlay];
 
-  const scene = new Scene(doc);
+  const fonts = canvasFontMetrics();
+  const layouts = new TextLayouts(fonts.measure);
+  const strokes = new StrokePaths();
+  /** A shape as drawn: an unnamed frame shows a placeholder name. */
+  const labelled = (shape: Shape): Shape =>
+    shape.type === "frame" && shape.text === "" ? { ...shape, text: FRAME_PLACEHOLDER } : shape;
+  const textLayout = (shape: Shape) => {
+    const drawn = labelled(shape);
+    return drawn.text === "" ? undefined : layouts.get(drawn);
+  };
+  // Text in a sticky note, box or ellipse shrinks to fit inside it; only a
+  // text shape's text and a frame's name can reach past the outline.
+  const scene = new Scene(doc, {
+    extent: (shape) =>
+      drawnExtent(
+        shape,
+        shape.type === "text" || shape.type === "frame" ? textLayout(shape) : undefined,
+      ),
+  });
   let state: EngineState = {
     camera: options.camera ?? { x: 0, y: 0, zoom: 1 },
     viewport: { width: 0, height: 0 },
@@ -257,9 +289,6 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const selectedShapes = (): Shape[] =>
     state.selection.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
 
-  const fonts = canvasFontMetrics();
-  const layouts = new TextLayouts(fonts.measure);
-  const strokes = new StrokePaths();
   const editor = new TextEditor({
     container,
     doc,
@@ -329,6 +358,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   function render(now: number) {
     // Gesture writes are applied once per frame, however many pointer events
     // arrived, which bounds the edits (and tombstones) a drag produces.
+    const started = performance.now();
     flushWrite();
     frame = null;
     const { camera, viewport } = state;
@@ -344,6 +374,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       background.dirty = false;
     }
 
+    let drawn = 0;
     if (shapes.dirty) {
       const ctx = shapes.ctx;
       ctx.setTransform(pr, 0, 0, pr, 0, 0);
@@ -355,7 +386,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       // Shapes in frames are cut off at each frame's edges. Shapes in the
       // same frames share one list, so the clip changes only between frames.
       let clipped: readonly ShapeId[] = [];
-      for (const shape of scene.ordered()) {
+      for (const shape of scene.visible(visibleBounds(camera, viewport))) {
         const frames = scene.framesAround(shape.id);
         if (frames !== clipped) {
           if (clipped.length > 0) ctx.restore();
@@ -371,17 +402,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
           }
           clipped = frames;
         }
-        const labelled =
-          shape.type === "frame" && shape.text === ""
-            ? { ...shape, text: FRAME_PLACEHOLDER }
-            : shape;
         // The editor shows the text of the shape being edited.
-        const text =
-          labelled.text === "" || shape.id === editing
-            ? undefined
-            : { layout: layouts.get(labelled), baseline: fonts.baseline, zoom: camera.zoom };
+        const layout = shape.id === editing ? undefined : textLayout(shape);
+        const text = layout && { layout, baseline: fonts.baseline, zoom: camera.zoom };
         const stroke = shape.type === "freehand" ? strokes.get(shape) : undefined;
-        drawShape(ctx, shape, theme.palette, { ...(text && { text }), ...(stroke && { stroke }) });
+        drawShape(ctx, shape, theme.palette, camera.zoom, {
+          ...(text && { text }),
+          ...(stroke && { stroke }),
+        });
+        drawn++;
       }
       if (clipped.length > 0) ctx.restore();
       shapes.dirty = false;
@@ -396,6 +425,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       drawOverlay(ctx);
       overlay.dirty = false;
     }
+
+    options.onFrame?.({ ms: performance.now() - started, drawn });
 
     // Keep drawing frames while remote cursors glide; stop once they've landed.
     if (cursorsMoved) {

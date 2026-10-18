@@ -183,4 +183,19 @@ describe("TextLayouts", () => {
     expect(layouts.get({ ...a, text: "hello" })).not.toBe(layouts.get(a));
     expect(layouts.get({ ...a, w: 300 })).not.toBe(layouts.get(a));
   });
+
+  it("keeps a whole board's layouts, so a redraw measures nothing", () => {
+    let measured = 0;
+    const layouts = new TextLayouts((s) => {
+      measured++;
+      return s.length;
+    });
+    const board = Array.from({ length: 12_000 }, (_, i) =>
+      shape({ id: `s${i}` as ShapeId, text: `note ${i}` }),
+    );
+    for (const s of board) layouts.get(s);
+    const first = measured;
+    for (const s of board) layouts.get(s);
+    expect(measured).toBe(first);
+  });
 });
