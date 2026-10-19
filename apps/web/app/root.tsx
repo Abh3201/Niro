@@ -9,6 +9,7 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { THEME_SCRIPT } from "./board/theme";
 
 export const links: Route.LinksFunction = () => [
   // An empty icon, so browsers don't request /favicon.ico until we have one.
@@ -17,9 +18,12 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // The theme script sets data-theme before React hydrates.
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a constant, ours. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
