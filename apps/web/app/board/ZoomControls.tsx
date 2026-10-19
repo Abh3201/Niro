@@ -1,18 +1,14 @@
 import type { Engine } from "@niro/engine";
-import { useSyncExternalStore } from "react";
+import { useEngineState } from "./useEngineState";
 
 /** Zoom out / current zoom (click to reset) / zoom in. */
 export function ZoomControls({ engine }: { engine: Engine }) {
   // Select just the zoom level, so panning doesn't re-render this component.
-  const zoom = useSyncExternalStore(
-    engine.subscribe,
-    () => engine.getState().camera.zoom,
-    () => 1,
-  );
+  const zoom = useEngineState(engine, (s) => s.camera.zoom, 1);
   const percent = Math.round(zoom * 100);
 
   return (
-    <div className="zoom-controls" role="toolbar" aria-label="Zoom">
+    <div className="panel zoom-controls" role="toolbar" aria-label="Zoom">
       <button
         type="button"
         onClick={engine.zoomOut}

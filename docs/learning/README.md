@@ -9,6 +9,6 @@ Each lab in the roadmap ends with a short write-up here, explaining the idea in 
 | L3 | Your own last-writer-wins sync over a simulated network | _not yet_ |
 | L4 | Toy CRDTs: LWW-Map with Lamport clocks, RGA for text | _not yet_ |
 | L5 | One chat app over gRPC, Connect, SSE and WebTransport | _not yet_ |
-| L6 | Yjs vs Loro spike | _not yet_ |
+| L6 | What a CRDT stores: Yjs vs Loro, tombstones, movable trees | [L6-yjs-vs-loro.md](L6-yjs-vs-loro.md) |
 | L7 | Decoding a Yjs update by hand | _not yet_ |
 | L8 | WebGL instanced shape renderer | _not yet_ |

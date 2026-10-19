@@ -1,11 +1,16 @@
-import { expect, test } from "@playwright/test";
-import { BLUE, expectPixel, TRANSPARENT, waitForBoard } from "./helpers";
+import { expect, type Page, test } from "@playwright/test";
+import { BLUE, drag, drawRectangle, expectPixel, openBoard, TRANSPARENT } from "./helpers";
 
-// Desktop Chrome viewport is 1280x720, so the 240x160 placeholder at the world
-// origin starts at screen (520, 280) to (760, 440).
+// Desktop Chrome viewport is 1280x720. Each test starts with a 240x160
+// rectangle from screen (520, 280) to (760, 440), centered on the world origin.
+async function boardWithRectangle(page: Page) {
+  await openBoard(page);
+  await drawRectangle(page, { x: 520, y: 280 }, { x: 760, y: 440 });
+  await expectPixel(page, 640, 360, BLUE);
+}
 
 test("ctrl + wheel zooms around the cursor", async ({ page }) => {
-  await waitForBoard(page);
+  await boardWithRectangle(page);
   await expectPixel(page, 770, 360, TRANSPARENT);
 
   // 10px inside the rectangle's right edge.
@@ -22,7 +27,7 @@ test("ctrl + wheel zooms around the cursor", async ({ page }) => {
 });
 
 test("plain wheel and trackpad scroll pan instead of zooming", async ({ page }) => {
-  await waitForBoard(page);
+  await boardWithRectangle(page);
   await page.mouse.move(640, 360);
   await page.mouse.wheel(0, 200);
 
@@ -32,20 +37,36 @@ test("plain wheel and trackpad scroll pan instead of zooming", async ({ page }) 
   await expectPixel(page, 640, 300, TRANSPARENT);
 });
 
-test("dragging pans the board", async ({ page }) => {
-  await waitForBoard(page);
-  await page.mouse.move(640, 360);
-  await page.mouse.down();
-  await page.mouse.move(740, 410, { steps: 5 });
-  await page.mouse.up();
+test("the hand tool, space + drag and middle-drag pan the board", async ({ page }) => {
+  await boardWithRectangle(page);
 
+  await page.keyboard.press("h");
+  await drag(page, { x: 640, y: 360 }, { x: 740, y: 410 });
   // Moved by (100, 50): now spans x 620..860, y 330..490.
   await expectPixel(page, 850, 480, BLUE);
   await expectPixel(page, 530, 290, TRANSPARENT);
+
+  await page.keyboard.press("v");
+  await page.keyboard.down("Space");
+  await drag(page, { x: 100, y: 100 }, { x: 0, y: 100 });
+  await page.keyboard.up("Space");
+  // Moved back left by 100: x 520..760.
+  await expectPixel(page, 530, 480, BLUE);
+  await expectPixel(page, 770, 480, TRANSPARENT);
+
+  await page.mouse.move(100, 100);
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.move(100, 50, { steps: 4 });
+  await page.mouse.up({ button: "middle" });
+  // Moved up by 50: y 280..440 again.
+  await expectPixel(page, 640, 430, BLUE);
+  await expectPixel(page, 640, 450, TRANSPARENT);
+  // None of that moved the shape itself.
+  await expect(page.getByTestId("board-status")).toHaveText("1 shape, 1 selected");
 });
 
 test("keyboard shortcuts and buttons step through zoom levels", async ({ page }) => {
-  await waitForBoard(page);
+  await boardWithRectangle(page);
   const level = page.getByTestId("zoom-level");
 
   await page.keyboard.press("Control+Equal");
@@ -71,7 +92,7 @@ test("does no work while idle", async ({ page }) => {
       return original(callback);
     };
   });
-  await waitForBoard(page);
+  await boardWithRectangle(page);
   await page.waitForTimeout(300);
 
   const count = () => page.evaluate(() => (window as unknown as { rafCalls: number }).rafCalls);
@@ -83,8 +104,10 @@ test("does no work while idle", async ({ page }) => {
 test.describe("on a touch screen", () => {
   test.use({ hasTouch: true });
 
-  test("two fingers pinch-zoom around their midpoint", async ({ page }) => {
-    await waitForBoard(page);
+  test("two fingers pinch-zoom around their midpoint, even starting on a shape", async ({
+    page,
+  }) => {
+    await boardWithRectangle(page);
     const cdp = await page.context().newCDPSession(page);
     const touch = (
       type: "touchStart" | "touchMove" | "touchEnd",

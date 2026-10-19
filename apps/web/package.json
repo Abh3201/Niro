@@ -11,13 +11,17 @@
     "typecheck": "react-router typegen && tsc -p ."
   },
   "dependencies": {
+    "@niro/doc": "workspace:*",
     "@niro/engine": "workspace:*",
     "@react-router/node": "^8.4.0",
     "@react-router/serve": "^8.4.0",
     "isbot": "^5.2.2",
+    "nanoid": "^6.0.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router": "^8.4.0"
+    "react-router": "^8.4.0",
+    "y-indexeddb": "^9.0.12",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "@react-router/dev": "^8.4.0",

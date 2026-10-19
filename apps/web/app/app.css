@@ -6,6 +6,9 @@
   --panel-border: #e2e3e8;
   --panel-fg: #1f2024;
   --panel-hover: #f0f1f4;
+  --accent: #2563eb;
+  --accent-soft: #dbe6fe;
+  --swatch-border: rgb(0 0 0 / 0.15);
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -17,6 +20,9 @@
     --panel-border: #34343c;
     --panel-fg: #ececf1;
     --panel-hover: #2e2e35;
+    --accent: #60a5fa;
+    --accent-soft: #1e2a44;
+    --swatch-border: rgb(255 255 255 / 0.2);
   }
 }
 
@@ -34,38 +40,130 @@ body {
   background: var(--board-bg);
 }
 
-.zoom-controls {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
+.panel {
   display: flex;
   align-items: center;
+  gap: 2px;
+  padding: 4px;
   background: var(--panel-bg);
+  color: var(--panel-fg);
   border: 1px solid var(--panel-border);
   border-radius: 10px;
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
-  overflow: hidden;
 }
 
-.zoom-controls button {
-  min-width: 40px;
+.panel button {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
   height: 36px;
+  padding: 0 6px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
-  color: var(--panel-fg);
+  color: inherit;
   font: inherit;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
-.zoom-controls button:hover {
+.panel button:hover:not(:disabled) {
   background: var(--panel-hover);
 }
 
-.zoom-controls button:focus-visible {
-  outline: 2px solid #3b82f6;
+.panel button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.panel button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.panel button:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+.toolbar {
+  position: fixed;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tools {
+  flex-direction: column;
+}
+
+.selection-panel {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.swatches {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.panel .swatch {
+  min-width: 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--swatch-border);
+}
+
+.panel .swatch[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  margin: 0 4px;
+  background: var(--panel-border);
+}
+
+.zoom-controls {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+}
+
+.notice {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .error-page {

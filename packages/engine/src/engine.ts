@@ -1,19 +1,50 @@
-import { type Camera, centerOn, nextZoomStep, zoomAt } from "./camera";
-import type { Viewport } from "./geometry";
+import {
+  type ColorName,
+  type DocStore,
+  indexesAbove,
+  newShapeId,
+  reorderStep,
+  reorderToEnd,
+  type Shape,
+  type ShapeId,
+} from "@niro/doc";
+import { type Camera, centerOn, nextZoomStep, worldToScreen, zoomAt } from "./camera";
+import type { Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
 import { InputController } from "./input";
+import { type EditorHost, Interaction, type ToolName } from "./interaction";
 import { Layer } from "./layers";
-import { drawScene } from "./scene";
+import { DARK_PALETTE, drawShape, LIGHT_PALETTE, type Palette } from "./render";
+import { Scene } from "./scene";
+import { HANDLE_SIZE, placeHandles, type SelectionFrame, selectionFrame } from "./selection";
+import { shapeCenter, shapeOutline } from "./shapes";
+import { translate } from "./transform";
+
+export type { ToolName } from "./interaction";
 
 export interface EngineState {
   readonly camera: Camera;
   readonly viewport: Viewport;
+  readonly tool: ToolName;
+  /** Selected shape ids. Local to this user: selection never goes into the document. */
+  readonly selection: readonly ShapeId[];
+  /** The color every selected shape shares, or null when mixed or nothing is selected. */
+  readonly selectionColor: ColorName | null;
+  readonly shapeCount: number;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  /** The board was saved by a newer version of Niro and can't be edited here. */
+  readonly readOnly: boolean;
 }
 
 export interface EngineOptions {
+  /** The board document. The engine reads and writes shapes only through it. */
+  doc: DocStore;
   /** Starting camera. By default the world origin is centered at 100%. */
   camera?: Camera;
 }
+
+export type ReorderDirection = "forward" | "backward" | "front" | "back";
 
 export interface Engine {
   /** Current state. The object is replaced (never mutated) on every change. */
@@ -24,6 +55,15 @@ export interface Engine {
   zoomIn(): void;
   zoomOut(): void;
   resetZoom(): void;
+  setTool(tool: ToolName): void;
+  select(ids: readonly ShapeId[]): void;
+  selectAll(): void;
+  deleteSelection(): void;
+  duplicateSelection(): void;
+  setSelectionColor(color: ColorName): void;
+  reorderSelection(direction: ReorderDirection): void;
+  undo(): void;
+  redo(): void;
   /** Marks everything as changed; it is redrawn once, on the next animation frame. */
   invalidate(): void;
   /** Stops rendering and removes everything the engine added to the page. */
@@ -32,18 +72,33 @@ export interface Engine {
 
 interface Theme {
   gridDot: string;
+  palette: Palette;
 }
 
-const DEFAULT_THEME: Theme = { gridDot: "#c4c6cf" };
+const DEFAULT_GRID_DOT = "#c4c6cf";
+/** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
+const DUPLICATE_OFFSET = 24;
+const NUDGE = { small: 1, large: 10 };
+
+const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
+  v: "select",
+  h: "hand",
+  r: "rectangle",
+  o: "ellipse",
+  n: "sticky",
+  l: "line",
+};
 
 /**
  * Mounts the engine into `container`, which it fills completely.
  *
  * The engine owns three stacked canvases: background (grid), shapes, and overlay
- * (selection, cursors). Callers, React or anything else, only hand it a container
- * and read its state through `getState` and `subscribe`.
+ * (selection, handles, marquee). Callers, React or anything else, only hand it
+ * a container and a `DocStore`, and read its state through `getState` and
+ * `subscribe`.
  */
-export function createEngine(container: HTMLElement, options: EngineOptions = {}): Engine {
+export function createEngine(container: HTMLElement, options: EngineOptions): Engine {
+  const { doc } = options;
   if (getComputedStyle(container).position === "static") container.style.position = "relative";
   container.style.touchAction = "none";
   container.style.userSelect = "none";
@@ -54,14 +109,24 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
   const overlay = new Layer(container, "overlay");
   const layers = [background, shapes, overlay];
 
+  const scene = new Scene(doc);
   let state: EngineState = {
     camera: options.camera ?? { x: 0, y: 0, zoom: 1 },
     viewport: { width: 0, height: 0 },
+    tool: "select",
+    selection: [],
+    selectionColor: null,
+    shapeCount: scene.size,
+    canUndo: doc.canUndo(),
+    canRedo: doc.canRedo(),
+    readOnly: doc.readOnly,
   };
   let cameraPlaced = options.camera !== undefined;
   let pixelRatio = window.devicePixelRatio || 1;
-  let theme = readTheme(container);
+  const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+  let theme = readTheme(container, colorScheme.matches);
   let frame: number | null = null;
+  let pendingWrite: (() => void) | null = null;
   const listeners = new Set<() => void>();
 
   const setState = (next: EngineState) => {
@@ -73,10 +138,11 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
     frame ??= requestAnimationFrame(render);
   };
 
-  const markAllDirty = () => {
-    for (const layer of layers) layer.dirty = true;
+  const markDirty = (...dirty: Layer[]) => {
+    for (const layer of dirty) layer.dirty = true;
     schedule();
   };
+  const markAllDirty = () => markDirty(...layers);
 
   const setCamera = (camera: Camera) => {
     const current = state.camera;
@@ -85,7 +151,70 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
     markAllDirty();
   };
 
+  const selectionColorOf = (ids: readonly ShapeId[]): ColorName | null => {
+    let color: ColorName | null = null;
+    for (const id of ids) {
+      const shape = scene.get(id);
+      if (!shape) continue;
+      if (color !== null && shape.color !== color) return null;
+      color = shape.color;
+    }
+    return color;
+  };
+
+  const setSelection = (ids: readonly ShapeId[]) => {
+    const next = [...new Set(ids)].filter((id) => scene.has(id));
+    const current = state.selection;
+    if (next.length === current.length && next.every((id, i) => id === current[i])) return;
+    setState({ ...state, selection: next, selectionColor: selectionColorOf(next) });
+    markDirty(overlay);
+  };
+
+  const selectedShapes = (): Shape[] =>
+    state.selection.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
+
+  const unsubscribeDoc = doc.subscribe((changes) => {
+    scene.apply(changes);
+    const selection = state.selection.filter((id) => scene.has(id));
+    setState({
+      ...state,
+      selection: selection.length === state.selection.length ? state.selection : selection,
+      selectionColor: selectionColorOf(selection),
+      shapeCount: scene.size,
+      canUndo: doc.canUndo(),
+      canRedo: doc.canRedo(),
+      readOnly: doc.readOnly,
+    });
+    markDirty(shapes, overlay);
+  });
+
+  const flushWrite = () => {
+    const write = pendingWrite;
+    pendingWrite = null;
+    write?.();
+  };
+
+  const host: EditorHost = {
+    doc,
+    scene,
+    camera: () => state.camera,
+    tool: () => state.tool,
+    setTool: (tool) => setTool(tool),
+    selection: () => state.selection,
+    setSelection,
+    scheduleWrite(write) {
+      pendingWrite = write;
+      schedule();
+    },
+    flushWrite,
+    overlayChanged: () => markDirty(overlay),
+  };
+  const interaction = new Interaction(host);
+
   function render() {
+    // Gesture writes are applied once per frame, however many pointer events
+    // arrived, which bounds the edits (and tombstones) a drag produces.
+    flushWrite();
     frame = null;
     const { camera, viewport } = state;
     const pr = pixelRatio;
@@ -103,14 +232,102 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
       // World -> device pixels: scale by zoom and pixel ratio, shift by the camera.
       const scale = pr * camera.zoom;
       ctx.setTransform(scale, 0, 0, scale, -camera.x * scale, -camera.y * scale);
-      drawScene(ctx);
+      for (const shape of scene.ordered()) drawShape(ctx, shape, theme.palette);
       shapes.dirty = false;
     }
 
     if (overlay.dirty) {
-      overlay.ctx.setTransform(pr, 0, 0, pr, 0, 0);
-      overlay.ctx.clearRect(0, 0, viewport.width, viewport.height);
+      const ctx = overlay.ctx;
+      ctx.setTransform(pr, 0, 0, pr, 0, 0);
+      ctx.clearRect(0, 0, viewport.width, viewport.height);
+      drawOverlay(ctx);
       overlay.dirty = false;
+    }
+  }
+
+  /** Selection, hover and marquee, drawn in screen space so lines stay crisp at any zoom. */
+  function drawOverlay(ctx: CanvasRenderingContext2D) {
+    const { camera } = state;
+    const { accent, handleFill } = theme.palette;
+    const toScreen = (p: Point) => worldToScreen(camera, p);
+    const outline = (points: Point[], close: boolean) => {
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const s = toScreen(p);
+        if (i === 0) ctx.moveTo(s.x, s.y);
+        else ctx.lineTo(s.x, s.y);
+      });
+      if (close) ctx.closePath();
+      ctx.stroke();
+    };
+    const outlineShape = (shape: Shape) => {
+      if (shape.type !== "ellipse") {
+        outline(shapeOutline(shape), shape.type !== "line");
+        return;
+      }
+      const c = toScreen(shapeCenter(shape));
+      ctx.beginPath();
+      ctx.ellipse(
+        c.x,
+        c.y,
+        (shape.w / 2) * camera.zoom,
+        (shape.h / 2) * camera.zoom,
+        shape.rotation,
+        0,
+        Math.PI * 2,
+      );
+      ctx.stroke();
+    };
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+
+    const hovered = interaction.hovered();
+    const hoveredShape =
+      hovered && !state.selection.includes(hovered) ? scene.get(hovered) : undefined;
+    if (hoveredShape) outlineShape(hoveredShape);
+
+    const selected = selectedShapes();
+    for (const shape of selected) outlineShape(shape);
+
+    const frame: SelectionFrame | null = selectionFrame(selected);
+    if (frame?.kind === "group") {
+      const b = frame.bounds;
+      ctx.setLineDash([4, 4]);
+      outline(
+        [
+          { x: b.minX, y: b.minY },
+          { x: b.maxX, y: b.minY },
+          { x: b.maxX, y: b.maxY },
+          { x: b.minX, y: b.maxY },
+        ],
+        true,
+      );
+      ctx.setLineDash([]);
+    }
+    if (frame && !state.readOnly && !interaction.busy()) {
+      ctx.fillStyle = handleFill;
+      for (const { target, at } of placeHandles(frame, camera)) {
+        ctx.beginPath();
+        if (target.kind === "resize") {
+          const half = HANDLE_SIZE / 2;
+          ctx.rect(at.x - half, at.y - half, HANDLE_SIZE, HANDLE_SIZE);
+        } else {
+          ctx.arc(at.x, at.y, HANDLE_SIZE / 2 + 1, 0, Math.PI * 2);
+        }
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    const marquee = interaction.marquee();
+    if (marquee) {
+      const a = toScreen({ x: marquee.minX, y: marquee.minY });
+      const b = toScreen({ x: marquee.maxX, y: marquee.maxY });
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.08;
+      ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.globalAlpha = 1;
+      ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     }
   }
 
@@ -125,7 +342,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
       camera = centerOn({ x: 0, y: 0 }, viewport);
       cameraPlaced = true;
     }
-    setState({ camera, viewport });
+    setState({ ...state, camera, viewport });
     schedule();
   };
 
@@ -137,6 +354,147 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
   };
 
   const resetZoom = () => setCamera(zoomAt(state.camera, viewportCenter(), 1));
+
+  function setTool(tool: ToolName) {
+    if (tool === state.tool) return;
+    interaction.cancel();
+    setState({ ...state, tool });
+    input.refreshCursor();
+    markDirty(overlay);
+  }
+
+  /** Runs one editing command as its own undo step. */
+  const command = (fn: Parameters<DocStore["transact"]>[0]) => {
+    if (doc.readOnly) return;
+    doc.checkpoint();
+    doc.transact(fn);
+    doc.checkpoint();
+  };
+
+  const deleteSelection = () => {
+    const ids = state.selection;
+    if (ids.length === 0) return;
+    command((tx) => {
+      for (const id of ids) tx.remove(id);
+    });
+  };
+
+  const duplicateSelection = () => {
+    const originals = selectedShapes();
+    if (originals.length === 0 || doc.readOnly) return;
+    const keys = indexesAbove(scene.ordered(), originals.length);
+    const copies = originals.map((shape, i) => ({
+      ...shape,
+      ...translate(shape, DUPLICATE_OFFSET, DUPLICATE_OFFSET),
+      id: newShapeId(),
+      index: keys[i] as string,
+    }));
+    command((tx) => {
+      for (const copy of copies) tx.add(copy);
+    });
+    setSelection(copies.map((c) => c.id));
+  };
+
+  const setSelectionColor = (color: ColorName) => {
+    const ids = state.selection;
+    command((tx) => {
+      for (const id of ids) tx.update(id, { color });
+    });
+  };
+
+  const reorderSelection = (direction: ReorderDirection) => {
+    const selected = new Set<string>(state.selection);
+    if (selected.size === 0) return;
+    const ordered = scene.ordered();
+    const keys =
+      direction === "forward" || direction === "backward"
+        ? reorderStep(ordered, selected, direction === "forward" ? 1 : -1)
+        : reorderToEnd(ordered, selected, direction === "front" ? 1 : -1);
+    command((tx) => {
+      for (const [id, index] of keys) tx.update(id as ShapeId, { index });
+    });
+  };
+
+  const nudge = (dx: number, dy: number) => {
+    const before = selectedShapes();
+    if (before.length === 0 || doc.readOnly) return;
+    // Consecutive nudges merge into one undo step, like a drag.
+    doc.transact((tx) => {
+      for (const shape of before) tx.update(shape.id, translate(shape, dx, dy));
+    });
+  };
+
+  const undo = () => {
+    interaction.cancel();
+    doc.undo();
+  };
+  const redo = () => {
+    interaction.cancel();
+    doc.redo();
+  };
+
+  const keyDown = (event: KeyboardEvent): boolean => {
+    const mod = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+    if (event.key === "Escape") {
+      if (interaction.cancel()) return true;
+      if (state.selection.length > 0) {
+        setSelection([]);
+        return true;
+      }
+      if (state.tool !== "select") {
+        setTool("select");
+        return true;
+      }
+      return false;
+    }
+    // Shortcuts would fight with a drag in progress.
+    if (interaction.busy()) return false;
+
+    if (mod && !event.altKey) {
+      if (key === "z") event.shiftKey ? redo() : undo();
+      else if (key === "y") redo();
+      else if (key === "a") selectAll();
+      else if (key === "d") duplicateSelection();
+      else return false;
+      return true;
+    }
+    if (mod || event.altKey) return false;
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      if (state.selection.length === 0) return false;
+      deleteSelection();
+      return true;
+    }
+    if (event.code === "BracketRight") {
+      reorderSelection(event.shiftKey ? "front" : "forward");
+      return true;
+    }
+    if (event.code === "BracketLeft") {
+      reorderSelection(event.shiftKey ? "back" : "backward");
+      return true;
+    }
+    const step = event.shiftKey ? NUDGE.large : NUDGE.small;
+    const arrows: Record<string, [number, number]> = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+    };
+    const arrow = arrows[event.key];
+    if (arrow && state.selection.length > 0) {
+      nudge(...arrow);
+      return true;
+    }
+    const tool = TOOL_KEYS[key];
+    if (tool && !event.shiftKey && !event.repeat) {
+      setTool(tool);
+      return true;
+    }
+    return false;
+  };
+
+  const selectAll = () => setSelection(scene.ordered().map((s) => s.id));
 
   // ResizeObserver doesn't fire when the window moves to a screen with a different
   // pixel ratio, so watch the ratio itself too.
@@ -151,9 +509,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
     pixelRatioQuery.addEventListener("change", onPixelRatioChange);
   };
 
-  const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
   const onColorSchemeChange = () => {
-    theme = readTheme(container);
+    theme = readTheme(container, colorScheme.matches);
     markAllDirty();
   };
 
@@ -163,17 +520,22 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
   colorScheme.addEventListener("change", onColorSchemeChange);
   resize();
 
-  const input = new InputController(
-    {
-      container,
-      getCamera: () => state.camera,
-      setCamera,
-      getViewport: () => state.viewport,
-      zoomStep,
-      resetZoom,
-    },
-    { primaryDragPans: true },
-  );
+  const input: InputController = new InputController({
+    container,
+    getCamera: () => state.camera,
+    setCamera,
+    getViewport: () => state.viewport,
+    zoomStep,
+    resetZoom,
+    primaryDragPans: () => state.tool === "hand",
+    toolDown: (pointer) => interaction.pointerDown(pointer),
+    toolMove: (pointer) => interaction.pointerMove(pointer),
+    toolUp: (pointer) => interaction.pointerUp(pointer),
+    toolHover: (pointer) => interaction.hover(pointer),
+    toolCancel: () => interaction.cancel(),
+    keyDown,
+    toolCursor: () => interaction.cursor(),
+  });
 
   return {
     getState: () => state,
@@ -185,9 +547,20 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
     zoomIn: () => zoomStep(1),
     zoomOut: () => zoomStep(-1),
     resetZoom,
+    setTool,
+    select: setSelection,
+    selectAll,
+    deleteSelection,
+    duplicateSelection,
+    setSelectionColor,
+    reorderSelection,
+    undo,
+    redo,
     invalidate: markAllDirty,
     destroy() {
+      interaction.cancel();
       input.destroy();
+      unsubscribeDoc();
       observer.disconnect();
       pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);
       colorScheme.removeEventListener("change", onColorSchemeChange);
@@ -198,7 +571,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions = {}
   };
 }
 
-function readTheme(container: HTMLElement): Theme {
+function readTheme(container: HTMLElement, dark: boolean): Theme {
   const style = getComputedStyle(container);
-  return { gridDot: style.getPropertyValue("--grid-dot").trim() || DEFAULT_THEME.gridDot };
+  return {
+    gridDot: style.getPropertyValue("--grid-dot").trim() || DEFAULT_GRID_DOT,
+    palette: dark ? DARK_PALETTE : LIGHT_PALETTE,
+  };
 }
