@@ -1,0 +1,13 @@
+{
+  "name": "@niro/netsim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic simulated network: seeded latency, loss, duplication, reordering, partitions and crashes, in virtual time.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}
