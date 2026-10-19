@@ -1,8 +1,8 @@
 import type { Engine } from "@niro/engine";
 import { useEngineState } from "./useEngineState";
 
-/** Zoom out / current zoom (click to reset) / zoom in. */
-export function ZoomControls({ engine }: { engine: Engine }) {
+/** Zoom out / current zoom (click to reset) / zoom in, and the shortcuts list. */
+export function ZoomControls({ engine, onHelp }: { engine: Engine; onHelp: () => void }) {
   // Select just the zoom level, so panning doesn't re-render this component.
   const zoom = useEngineState(engine, (s) => s.camera.zoom, 1);
   const percent = Math.round(zoom * 100);
@@ -28,6 +28,16 @@ export function ZoomControls({ engine }: { engine: Engine }) {
       </button>
       <button type="button" onClick={engine.zoomIn} aria-label="Zoom in" title="Zoom in (Ctrl =)">
         +
+      </button>
+      <span className="divider" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={onHelp}
+        aria-label="Keyboard shortcuts"
+        title="Keyboard shortcuts (?)"
+        data-testid="shortcuts-button"
+      >
+        ?
       </button>
     </div>
   );

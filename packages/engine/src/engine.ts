@@ -7,6 +7,7 @@ import {
   type Shape,
   type ShapeId,
 } from "@niro/doc";
+import { describeShape, nextInReadingOrder, ShapeList } from "./a11y";
 import { asDrawn, detachUnless } from "./arrows";
 import { transact } from "./board-tx";
 import {
@@ -30,7 +31,7 @@ import { type RemotePeer, SmoothedCursors } from "./presence";
 import { DARK_PALETTE, drawnExtent, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
 import { HANDLE_SIZE, placeHandles } from "./selection";
-import { shapeCenter, shapeOutline } from "./shapes";
+import { shapeBounds, shapeCenter, shapeOutline } from "./shapes";
 import {
   duplicate,
   group,
@@ -75,6 +76,8 @@ export interface EngineState {
   readonly readOnly: boolean;
   /** The shape whose text is being edited, if any. */
   readonly editing: ShapeId | null;
+  /** Words for the selected shape, for screen readers; empty unless one shape is selected. */
+  readonly selectionLabel: string;
 }
 
 export interface EngineOptions {
@@ -193,6 +196,12 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   container.style.touchAction = "none";
   container.style.userSelect = "none";
   container.style.overflow = "hidden";
+  // The board takes keyboard focus, and its own keys: screen readers pass
+  // them through to an application rather than reading with them.
+  if (!container.hasAttribute("tabindex")) container.tabIndex = 0;
+  container.setAttribute("role", "application");
+  container.setAttribute("aria-roledescription", "whiteboard");
+  if (!container.hasAttribute("aria-label")) container.setAttribute("aria-label", "Board");
 
   const background = new Layer(container, "background");
   const shapes = new Layer(container, "shapes");
@@ -231,6 +240,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     canRedo: doc.canRedo(),
     readOnly: doc.readOnly,
     editing: null,
+    selectionLabel: "",
   };
   let cameraPlaced = options.camera !== undefined;
   let pixelRatio = window.devicePixelRatio || 1;
@@ -286,6 +296,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     selectionColor: sharedColor(scene, ids),
     canGroup: outermost(scene, ids).length >= 2,
     canUngroup: ids.some((id) => scene.get(id)?.type === "group"),
+    selectionLabel: ids.length === 1 ? describeShape(scene, ids[0] as ShapeId) : "",
   });
 
   const setSelection = (ids: readonly ShapeId[]) => {
@@ -317,8 +328,18 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     redo: () => redo(),
   });
 
+  const shapeList = new ShapeList(container, scene);
+  // A press on the board gives it keyboard focus (not a press in the text
+  // editor, which keeps its own).
+  const focusBoard = (event: PointerEvent) => {
+    if (event.target !== container && !(event.target instanceof HTMLCanvasElement)) return;
+    if (document.activeElement !== container) container.focus({ preventScroll: true });
+  };
+  container.addEventListener("pointerdown", focusBoard);
+
   const unsubscribeDoc = doc.subscribe((changes) => {
     scene.apply(changes);
+    shapeList.changed();
     // Editing just stopped (the board filled up): drop any drawing tool.
     if (doc.readOnly && !VIEW_TOOLS.has(state.tool)) setTool("select");
     if (doc.readOnly) editor.stop();
@@ -700,9 +721,49 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     doc.redo();
   };
 
+  /** Pans to shape `id` if any of it is off screen. */
+  const bringIntoView = (id: ShapeId) => {
+    const shape = scene.get(id);
+    if (!shape) return;
+    const box = shapeBounds(shape);
+    const view = visibleBounds(state.camera, state.viewport);
+    if (
+      box.minX >= view.minX &&
+      box.minY >= view.minY &&
+      box.maxX <= view.maxX &&
+      box.maxY <= view.maxY
+    )
+      return;
+    const center = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+    setCamera(centerOn(center, state.viewport, state.camera.zoom));
+  };
+
+  /**
+   * Tab and Shift + Tab on the board step through shapes in reading order.
+   * Past the last (or first) shape the selection clears and the browser
+   * moves focus on as usual, so the keyboard never gets stuck on the board.
+   */
+  const stepSelection = (event: KeyboardEvent): boolean => {
+    if (event.target !== container && event.target !== document.body) return false;
+    const current = state.selection.at(event.shiftKey ? 0 : -1) ?? null;
+    const next = nextInReadingOrder(scene, current, event.shiftKey ? -1 : 1);
+    if (next === null) {
+      setSelection([]);
+      return false;
+    }
+    setSelection([next]);
+    bringIntoView(next);
+    if (document.activeElement !== container) container.focus({ preventScroll: true });
+    return true;
+  };
+
   const keyDown = (event: KeyboardEvent): boolean => {
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
+    if (event.key === "Tab" && !mod && !event.altKey) {
+      if (interaction.busy()) return false;
+      return stepSelection(event);
+    }
     if (event.key === "Escape") {
       if (interaction.cancel()) return true;
       if (state.selection.length > 0) {
@@ -857,6 +918,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       editor.stop();
       input.destroy();
       unsubscribeDoc();
+      shapeList.destroy();
+      container.removeEventListener("pointerdown", focusBoard);
       observer.disconnect();
       pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);
       colorScheme.removeEventListener("change", onColorSchemeChange);

@@ -340,6 +340,8 @@ export class InputController {
 
   private onKeyDown(event: KeyboardEvent): void {
     if (isEditable(event.target)) return;
+    // Keys in a dialog over the board are the dialog's.
+    if (event.target instanceof Element && event.target.closest("dialog")) return;
     // Enter on a focused button presses it.
     if (event.key === "Enter" && isButton(event.target)) return;
 
