@@ -1,0 +1,13 @@
+# HTTPS in front of Niro, with a certificate from Let's Encrypt.
+# Used by compose.https.yml; see docs/self-hosting.md.
+{$NIRO_DOMAIN} {
+	# The board's WebSocket goes to the realtime server...
+	handle /ws {
+		reverse_proxy realtime:8787
+	}
+	# ...and everything else to the web app. /healthz and /metrics stay
+	# inside the compose network.
+	handle {
+		reverse_proxy web:3000
+	}
+}

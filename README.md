@@ -2,7 +2,7 @@
 
 An open source, self-hostable whiteboard in the spirit of Miro, and a project for learning, from first principles, how canvas rendering, real-time collaboration and network transports work.
 
-**Status:** P5 (performance). Sticky notes, rectangles, ellipses, lines, arrows, pen strokes and text you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo; text in every box shape; arrows that stay attached to the shapes they connect; groups, and frames that hold and clip what's in them. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts. A 10,000-shape board pans in about 5 ms a frame at 100% (measured; see [the performance notes](docs/learning/performance.md)).
+**Status:** v0.1 nearly done (P6: export, keyboard and screen-reader support, docs). Sticky notes, rectangles, ellipses, lines, arrows, pen strokes and text you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo; text in every box shape; arrows that stay attached to the shapes they connect; groups, and frames that hold and clip what's in them. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts. A 10,000-shape board pans in about 5 ms a frame at 100% (measured; see [the performance notes](docs/learning/performance.md)). Export to PNG or SVG; move through shapes with the keyboard; screen readers can read the board.
 
 | To | Do |
 |---|---|
@@ -30,7 +30,9 @@ echo "NIRO_SECRET=$(openssl rand -hex 32)" > .env
 docker compose up --build
 ```
 
-Then open http://localhost:3000. The realtime server listens on http://localhost:8787: WebSockets on `/ws`, `/healthz`, and `/metrics` in the Prometheus format. Boards are kept in the `pgdata` volume; `docker compose down -v` deletes them.
+Then open http://localhost:3000. To run it on a server with HTTPS on your own domain, add `compose.https.yml`: **[docs/self-hosting.md](docs/self-hosting.md)** walks through that, other reverse proxies, backups, upgrades and monitoring.
+
+The realtime server listens on http://localhost:8787: WebSockets on `/ws`, `/healthz`, and `/metrics` in the Prometheus format. Boards are kept in the `pgdata` volume; `docker compose down -v` deletes them.
 
 `NIRO_SECRET` signs share links: keep it private, and keep it the same across restarts, or every link stops working. [`.env.example`](.env.example) lists the other settings:
 
@@ -96,8 +98,12 @@ Two rules keep the architecture honest:
 | P3a | Multiplayer: rooms, sync, live cursors, share links |
 | P3b | Persistence, limits, network-fault simulation tests, metrics |
 | P4 | Text, pen, arrows, groups and frames |
-| **P5** | Performance: spatial index, culling, level of detail |
-| P6 | v0.1 release |
+| P5 | Performance: spatial index, culling, level of detail |
+| **P6** | v0.1 release: export, keyboard and screen readers, self-hosting docs |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). What changed in each release: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
