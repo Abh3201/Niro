@@ -172,7 +172,13 @@ export class InputController {
       this.startPan(event.pointerId, point);
       return;
     }
-    if (event.button !== 0) return;
+    if (event.button !== 0) {
+      // Not ours (a right-click, say): forget it now, since its pointerup may
+      // never come here (the context menu takes it) and a pointer left in
+      // the map turns off hover and would pair with the next touch as a pinch.
+      this.pointers.delete(event.pointerId);
+      return;
+    }
 
     if (this.host.toolDown(this.toolPointerFrom(event, point))) {
       this.toolPointer = event.pointerId;

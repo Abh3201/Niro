@@ -124,7 +124,11 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
   // A key the server already turned down grants nothing: show what's here, read-only.
   const role = key && client.status !== "denied" ? roleOf(key) : "view";
   const store = createYDocStore(doc, { readOnly: role === "view" });
-  const followServer = () => store.setReadOnly(client.readOnly !== null);
+  // A refusal can also come after the board opened (a returning visitor
+  // whose saved copy let it open before the server answered): then edits
+  // would stay in this browser only, so stop them.
+  const followServer = () =>
+    store.setReadOnly(client.readOnly !== null || client.status === "denied");
   followServer();
   client.subscribe(followServer);
   // The browser knows before the backoff timer that the network is back.

@@ -62,6 +62,28 @@ describe("HTTP", () => {
     expect(res.status).toBe(404);
   });
 
+  it("stays up after request targets that aren't valid URLs", async () => {
+    const [host, port] = h.base.split(":") as [string, string];
+    for (const upgrade of [false, true]) {
+      const socket = connect(Number(port), host);
+      await new Promise((resolve) => socket.once("connect", resolve));
+      const response = new Promise<string>((resolve) => {
+        socket.once("data", (data) => resolve(String(data)));
+      });
+      socket.write(
+        `GET //[ HTTP/1.1\r\nHost: ${h.base}\r\n` +
+          (upgrade
+            ? "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+            : "") +
+          "\r\n",
+      );
+      expect(await response).toMatch(/^HTTP\/1\.1 404/);
+      socket.destroy();
+    }
+    const res = await fetch(`http://${h.base}/healthz`);
+    expect(res.status).toBe(200);
+  });
+
   it("serves metrics in the Prometheus text format", async () => {
     const a = h.tab();
     await until(() => a.client.status === "online");
@@ -117,6 +139,26 @@ describe("upgrade", () => {
       if (status !== 101) await sleep(20);
     }
     expect(status).toBe(101);
+  });
+
+  it("refuses connections past the server-wide limit, on any board", async () => {
+    await restart({ limits: { connections: 2 } });
+    await h.socket();
+    await h.socket("edit", OTHER_BOARD);
+    expect(await h.upgradeStatus(h.url(h.token("edit", "board-third1"), "board-third1"))).toBe(503);
+    expect(await h.upgradeStatus(h.url(h.token()))).toBe(503);
+    const text = await (await fetch(`http://${h.base}/metrics`)).text();
+    expect(text).toContain('niro_connections_rejected_total{reason="server_full"} 2');
+  });
+
+  it("turns away boards nobody has open once the open ones fill the memory budget", async () => {
+    await restart({ limits: { openBytes: 1000 } });
+    const ws = await h.socket();
+    ws.send(syncStep2(updateOf(2000)));
+    await until(() => h.server.rooms.get(BOARD)?.doc.getMap("m").has("x") === true);
+    // Another board would load: refused. The open one still takes people.
+    expect(await h.upgradeStatus(h.url(h.token("edit", OTHER_BOARD), OTHER_BOARD))).toBe(503);
+    expect(await h.upgradeStatus(h.url(h.token()))).toBe(101);
   });
 
   it("answers 503 when the board can't be loaded", async () => {
@@ -256,15 +298,24 @@ describe("limits", () => {
   });
 
   it("closes a connection that sends a message over the ceiling, and stays up", async () => {
-    // The ceiling is twice the document limit: 2,000 bytes here.
+    // An editor's ceiling is twice the document limit: 2,000 bytes here.
     await restart({ limits: { documentBytes: 1000 } });
-    const ws = await h.socket("view");
+    const ws = await h.socket("edit");
     const closed = closeCode(ws);
     ws.send(new Uint8Array(3000));
     expect(await closed).toBe(1009);
 
     const a = h.tab();
     await until(() => a.client.status === "online");
+  });
+
+  it("gives a viewer no big catch-up: its ceiling is the live message limit", async () => {
+    await restart({ limits: { messageBytes: 1000 } });
+    const ws = await h.socket("view");
+    const closed = closeCode(ws);
+    ws.send(syncStep2(updateOf(5000)));
+    expect(await closed).toBe(1009);
+    expect(h.server.rooms.get(BOARD)?.doc.getMap("m").has("x") ?? false).toBe(false);
   });
 
   it("closes a connection that sends a flood of messages with 4029", async () => {
@@ -298,12 +349,14 @@ describe("limits", () => {
     expect(await closed).toBe(1007);
   });
 
-  it("start from the plan's values", () => {
+  it("start from the plan's values, with board memory measured since", () => {
     expect(DEFAULT_LIMITS).toEqual({
       messageBytes: 1024 * 1024,
-      documentBytes: 20 * 1024 * 1024,
+      documentBytes: 5 * 1024 * 1024,
       shapes: 10_000,
       connectionsPerRoom: 100,
+      openBytes: 40 * 1024 * 1024,
+      connections: 2_000,
       messagesPerSecond: 200,
       bytesPerSecond: 1024 * 1024,
     });

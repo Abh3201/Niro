@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    // browser.spec.ts runs code in the page.
+    "lib": ["ES2022", "DOM"],
+    // The WebTransport package publishes its Node types under the "node" condition.
+    "customConditions": ["node"]
+  },
+  "include": ["src"]
+}

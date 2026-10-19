@@ -15,7 +15,16 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // Lab L5: the browser's WebTransport against the lab's server, which it starts itself.
+    {
+      name: "labs",
+      testDir: "labs/l5-transports/src",
+      testMatch: "browser.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+  ],
   // Runs the production builds, so `pnpm build` must come first.
   webServer: [
     {

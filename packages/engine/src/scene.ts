@@ -250,11 +250,16 @@ export class Scene {
 
   /**
    * The topmost frame `p` is inside (and not cut off from by an outer
-   * frame), other than those in `exclude`: where a shape put at `p` belongs.
+   * frame), other than those in `exclude` or refused by `accept`: where a
+   * shape put at `p` belongs.
    */
-  frameAt(p: Point, exclude: ReadonlySet<ShapeId> = new Set()): ShapeId | null {
+  frameAt(
+    p: Point,
+    exclude: ReadonlySet<ShapeId> = new Set(),
+    accept: (frame: Shape) => boolean = () => true,
+  ): ShapeId | null {
     for (const shape of this.near({ minX: p.x, minY: p.y, maxX: p.x, maxY: p.y })) {
-      if (shape.type !== "frame" || exclude.has(shape.id)) continue;
+      if (shape.type !== "frame" || exclude.has(shape.id) || !accept(shape)) continue;
       if (inside(shape, p) && this.visibleAt(shape.id, p)) return shape.id;
     }
     return null;

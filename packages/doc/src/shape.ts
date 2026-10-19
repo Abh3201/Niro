@@ -161,6 +161,17 @@ const finite = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 /**
+ * Furthest a position or size may be from zero, in world units: thousands of
+ * times any real board, and far enough inside double precision that adding
+ * a pixel still changes the number (at 1e20 it doesn't, and loops that step
+ * across the screen never end).
+ */
+export const MAX_COORDINATE = 1e9;
+
+const coordinate = (value: unknown, fallback: number): number =>
+  Math.min(MAX_COORDINATE, Math.max(-MAX_COORDINATE, finite(value, fallback)));
+
+/**
  * Turns whatever is stored for a shape into a valid `Shape`, or `null` when it
  * can't be drawn (an unknown type, for example one added by a newer version).
  *
@@ -175,8 +186,8 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const shapeType = type as ShapeType;
   const isLine = isLinear(shapeType);
 
-  let w = finite(raw.w, 100);
-  let h = finite(raw.h, 100);
+  let w = coordinate(raw.w, 100);
+  let h = coordinate(raw.h, 100);
   if (!isLine) {
     w = Math.max(MIN_SIZE, Math.abs(w));
     h = Math.max(MIN_SIZE, Math.abs(h));
@@ -192,8 +203,8 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   return {
     id: id as ShapeId,
     type: shapeType,
-    x: finite(raw.x, 0),
-    y: finite(raw.y, 0),
+    x: coordinate(raw.x, 0),
+    y: coordinate(raw.y, 0),
     w,
     h,
     rotation: isLine || !rotates(shapeType) ? 0 : normalizeAngle(finite(raw.rotation, 0)),

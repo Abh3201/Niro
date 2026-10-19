@@ -75,8 +75,10 @@ Set these in `.env`, next to `docker-compose.yml`.
 | `WEB_PORT`, `REALTIME_PORT` | 3000, 8787 | Ports published without `compose.https.yml`. If you change `REALTIME_PORT`, set `PUBLIC_REALTIME_URL` to match. |
 | `METRICS_TOKEN` | none | When set, `/metrics` needs `Authorization: Bearer <token>`. Set it if port 8787 is reachable from outside. |
 | `NIRO_MAX_SHAPES` | 10000 | Shapes on one board. A board at the limit turns read-only for everyone, and says so. |
-| `NIRO_MAX_BOARD_MB` | 20 | Size of one board, in MB of stored document. Same as above. |
+| `NIRO_MAX_BOARD_MB` | 5 | Size of one board, in MB of stored document. Same as above. |
 | `NIRO_MAX_CONNECTIONS_PER_BOARD` | 100 | People (browser tabs) on one board at once; more are turned away. |
+| `NIRO_MAX_OPEN_MB` | 40 | The realtime server's memory budget: MB of open boards, together. Past it, boards nobody has open are turned away until some close; open boards keep working. Allow about 25 MB of memory per MB set here. |
+| `NIRO_MAX_CONNECTIONS` | 2000 | People (browser tabs) on the whole realtime server at once; more are turned away. |
 
 ## Backups
 
@@ -124,7 +126,9 @@ With `compose.https.yml`, `/metrics` isn't reachable from outside. To scrape it,
 ## Limits to know about
 
 - **One realtime server per database.** Two servers would each compact away the other's writes. Niro v0.1 doesn't scale out; one server holds a lot of boards (see [decision 0003](decisions/0003-storage.md)).
-- **Board size.** 10,000 shapes or 20 MB per board by default, as above.
+- **Board size.** 10,000 shapes or 5 MB per board by default, as above. 10,000 sticky notes take about 3 MB, so only boards full of long text or pen strokes get near 5 MB.
+- **Memory.** An open board takes about 25 times its stored size in the realtime server's memory (measured with sticky notes: 1,000 of them are 0.28 MB stored and 8 MB in memory; 10,000 are 3 MB and 67 MB). `NIRO_MAX_OPEN_MB` caps the open boards together; the default, 40, is about 1 GB. Set it to what your machine can spare divided by 25: on a 2 GB machine that also runs Postgres and the web app, about 30. A board stays open while anyone has it open, and is written and closed when the last person leaves.
+- **Turned away.** A browser refused by a limit on people or memory shows the board as offline and keeps retrying, so it gets in once there's room. `niro_connections_rejected_total` in `/metrics` counts refusals by reason (`room_full`, `server_full`), and `niro_open_board_bytes` shows how full the budget is.
 - **No accounts.** Anyone with a link has its access; see below.
 
 ## Security
@@ -145,4 +149,5 @@ With `compose.https.yml`, `/metrics` isn't reachable from outside. To scrape it,
 | Every link stopped working after a restart | `NIRO_SECRET` changed. Put back the old one. |
 | `password authentication failed` in the realtime logs | `POSTGRES_PASSWORD` changed after the database was created; see [Settings](#settings). |
 | A board says it's read-only | It reached `NIRO_MAX_SHAPES` or `NIRO_MAX_BOARD_MB`, or you have a view link. |
+| Some boards stay offline while others work | The server is at `NIRO_MAX_OPEN_MB` or `NIRO_MAX_CONNECTIONS`. `/metrics` shows `server_full` refusals. Raise the limit if the machine has memory to spare. |
 | Caddy can't get a certificate | DNS for `NIRO_DOMAIN` doesn't point at this machine yet, or ports 80 and 443 are closed. |

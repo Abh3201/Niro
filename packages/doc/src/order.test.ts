@@ -57,7 +57,7 @@ describe("isValidIndex", () => {
   it("accepts generated keys and rejects junk", () => {
     expect(isValidIndex("a0")).toBe(true);
     expect(isValidIndex("a0V")).toBe(true);
-    for (const junk of ["", "a", "zz", "A0", "x".repeat(300)])
+    for (const junk of ["", "a", "zz", "A0", "x".repeat(300), "a0~", "a0é", "a!", "a0 "])
       expect(isValidIndex(junk)).toBe(false);
   });
 });

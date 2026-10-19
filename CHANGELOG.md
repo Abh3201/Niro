@@ -28,7 +28,7 @@ The first release: a whiteboard you can run yourself and share by link.
 
 - `docker compose up` runs the web app, the realtime server and Postgres. `compose.https.yml` adds Caddy for HTTPS on your own domain. See [docs/self-hosting.md](docs/self-hosting.md).
 - A demo deploy on Azure App Service's free tier, with Postgres on Neon: [docs/deploy-azure.md](docs/deploy-azure.md).
-- Limits per board (shapes, size, people) and Prometheus metrics on the realtime server.
+- Limits per board (shapes, size, people), limits for the whole realtime server (memory for open boards, people), and Prometheus metrics on the realtime server.
 
 ### Known limits
 

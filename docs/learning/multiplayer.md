@@ -77,11 +77,14 @@ A whiteboard server has to say no sometimes. The starting values are guesses, wh
 | Limit | Default | What happens |
 |---|---|---|
 | Shapes on a board | 10,000 | The board turns read-only for everyone, and the browser says why |
-| Board size | 20 MB | Same. Measured only when a running estimate passes the limit, since measuring means encoding the whole board |
+| Board size | 5 MB | Same. Measured only when a running estimate passes the limit, since measuring means encoding the whole board |
 | One message | 1 MB | Connection closed (1009). The browser reconnects and sends the change in its catch-up, which may be bigger |
 | Messages per connection | 200/s, bursts of 400 | Connection closed (4029). A token bucket: short bursts pass, a steady flood doesn't |
 | Bytes per connection | 1 MB/s, bursts of 4 MB | Same |
 | Connections to one board | 100 | Refused (503) before the WebSocket opens |
+| Open boards, together | 40 MB stored, about 1 GB in memory | Boards nobody has open are refused (503) until some close. A board in memory takes about 25 times its stored size, so this is the server's memory budget |
+| Connections to the server | 2,000 | Refused (503) before the WebSocket opens |
+| One message from a viewer | 1 MB, catch-up included | Connection closed (1009). Viewers' changes are refused anyway, so only editors get the bigger first catch-up |
 
 Why read-only for everyone rather than refusing the one update that went over? A CRDT update can't be taken back once others may have it, and refusing single updates would leave copies that never agree again. Refusing everything after the line keeps every copy equal.
 

@@ -1,0 +1,14 @@
+{
+  "name": "@niro/lab-l7-yjs-update",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lab L7: decode a Yjs update by hand, byte by byte, and check the result against Yjs.",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@niro/doc": "workspace:*",
+    "yjs": "^13.6.33"
+  }
+}

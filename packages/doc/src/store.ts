@@ -72,6 +72,12 @@ export interface DocStore {
    * start of every gesture or command.
    */
   checkpoint(): void;
+  /**
+   * Starts an undo step that lasts until the returned function is called,
+   * however long that is: a drag held still for a second is still one step.
+   * Ends the current step first, like `checkpoint`.
+   */
+  holdStep(): () => void;
   /** Reverts this user's last step. Collaborators' changes are never undone. */
   undo(): void;
   redo(): void;

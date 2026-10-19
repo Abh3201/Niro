@@ -21,7 +21,7 @@ From Microsoft's [App Service limits](https://learn.microsoft.com/azure/azure-re
 - **5 WebSockets per instance.** Every browser tab on a board holds one, so at most **5 tabs on boards at once**, across all boards. This is the limit you'll hit first.
 - **60 CPU minutes per app per day.** Past that, the app is stopped and answers `403` until midnight UTC. Niro's realtime server is light, so a few people editing for an hour or two should fit; that's an estimate, not a measurement.
 - **No Always On.** An app nobody has used for about 20 minutes is unloaded, and the next visit waits for it to start (tens of seconds). The realtime server writes every open board when it's stopped, so nothing is lost; browsers reconnect by themselves.
-- **1 GB of memory and 1 GB of disk**, shared by the plan. Niro's two apps take about 80 MB of disk and well under the memory limit.
+- **1 GB of memory and 1 GB of disk**, shared by the plan. Niro's two apps take about 80 MB of disk. Step 4 caps the realtime server's open boards at about 250 MB of memory (`NIRO_MAX_OPEN_MB=10`).
 - **One instance.** That suits Niro, which allows only one realtime server per database anyway.
 - **No custom domain with HTTPS.** Use the `azurewebsites.net` addresses.
 - **Starter subscriptions are for development and testing**, and Microsoft may remove the apps if the subscription goes unused for 90 days.
@@ -75,9 +75,11 @@ az webapp config set --resource-group $RG --name $RT \
   --startup-file "node dist/index.js"
 az webapp config appsettings set --resource-group $RG --name $RT --settings \
   NODE_ENV=production NIRO_SECRET=$SECRET DATABASE_URL="$DATABASE_URL" \
-  SCM_DO_BUILD_DURING_DEPLOYMENT=false
+  NIRO_MAX_OPEN_MB=10 SCM_DO_BUILD_DURING_DEPLOYMENT=false
 az webapp deploy --resource-group $RG --name $RT --src-path out/azure/realtime.zip --type zip
 ```
+
+`NIRO_MAX_OPEN_MB=10` keeps the realtime server's open boards to about 250 MB of memory, since the plan's 1 GB is shared by both apps (an open board takes about 25 times its stored size; see [self-hosting.md](self-hosting.md#limits-to-know-about)). The default, 40, is about 1 GB on its own.
 
 Check it: `curl https://$RT.azurewebsites.net/healthz` answers `{"status":"ok"}` (the first call can take a while, as the app starts).
 
@@ -106,7 +108,7 @@ Both apps must have the same `NIRO_SECRET`, and it must stay the same: it signs 
 
 | You see | Likely cause |
 |---|---|
-| The board says it's offline | The browser can't reach the realtime server. Check `PUBLIC_REALTIME_URL` is `wss://<realtime-name>.azurewebsites.net` (no `/ws`), Web sockets is on for the realtime app, and `/healthz` answers. More than 5 tabs open on boards also does this. |
+| The board says it's offline | The browser can't reach the realtime server. Check `PUBLIC_REALTIME_URL` is `wss://<realtime-name>.azurewebsites.net` (no `/ws`), Web sockets is on for the realtime app, and `/healthz` answers. More than 5 tabs open on boards also does this, and so does the realtime server being at `NIRO_MAX_OPEN_MB`. |
 | `403 Site Disabled` | An app used its 60 CPU minutes for the day. It comes back at midnight UTC. |
 | The first visit takes a long time | The apps were unloaded while idle. Expected on the free tier. |
 | Every link stopped working | `NIRO_SECRET` changed on one or both apps. |

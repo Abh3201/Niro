@@ -37,15 +37,28 @@ export interface Limits {
   /** Largest message, except a connection's first catch-up (sync step 2). */
   messageBytes: number;
   /**
-   * About the largest a board gets before it turns read-only. A catch-up
-   * message may be up to twice this: a client can hold a board slightly over
-   * the limit, and it may have to send all of it after the server lost data.
+   * About the largest a board gets before it turns read-only, as stored. A
+   * catch-up message may be up to twice this: a client can hold a board
+   * slightly over the limit, and it may have to send all of it after the
+   * server lost data. In memory a board takes about 25 times its stored
+   * size (measured with sticky notes: 1,000 of them are 0.28 MB stored and
+   * 8 MB in memory, 10,000 are 3 MB and 67 MB), so 5 MB is about 125 MB.
    */
   documentBytes: number;
   /** Shapes on a board before it turns read-only. */
   shapes: number;
   /** Connections to one board. */
   connectionsPerRoom: number;
+  /**
+   * Stored size of all open boards together. Past it, boards nobody has open
+   * are turned away until some close; open ones keep working. This is the
+   * server's memory budget: about 25 times this, see `documentBytes`.
+   * Checked before a board loads, so boards loading at that moment can take
+   * it over by their own size.
+   */
+  openBytes: number;
+  /** Connections to the whole server. */
+  connections: number;
   /** Messages a connection may send per second, sustained. Bursts of twice that pass. */
   messagesPerSecond: number;
   /** Bytes a connection may send per second, sustained. Bursts of four times that pass. */
@@ -54,9 +67,12 @@ export interface Limits {
 
 export const DEFAULT_LIMITS: Limits = {
   messageBytes: 1024 * 1024,
-  documentBytes: 20 * 1024 * 1024,
+  documentBytes: 5 * 1024 * 1024,
   shapes: 10_000,
   connectionsPerRoom: 100,
+  // About 1 GB of memory.
+  openBytes: 40 * 1024 * 1024,
+  connections: 2_000,
   messagesPerSecond: 200,
   bytesPerSecond: 1024 * 1024,
 };
@@ -96,6 +112,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   const alive = new WeakMap<WebSocket, boolean>();
   /** Connections per board, counted from before the board loads so a crowd can't race past the limit. */
   const connections = new Map<string, number>();
+  /** Every board's count in `connections`, added up. */
+  let connectionCount = 0;
   let closing = false;
 
   const registry = new Registry();
@@ -113,6 +131,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
           "unauthorized",
           "shutting_down",
           "room_full",
+          "server_full",
           "unavailable",
         ].map((reason) => ({ reason })),
       ),
@@ -182,9 +201,22 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   });
 
   registry.add(
-    new Sampled("niro_connections", "gauge", "Open WebSocket connections.", () => wss.clients.size),
+    new Sampled(
+      "niro_connections",
+      "gauge",
+      "Open WebSocket connections.",
+      () => editors.clients.size + viewers.clients.size,
+    ),
   );
   registry.add(new Sampled("niro_rooms", "gauge", "Boards open in memory.", () => host.rooms.size));
+  registry.add(
+    new Sampled(
+      "niro_open_board_bytes",
+      "gauge",
+      "Stored size of the open boards, an upper bound (see NIRO_MAX_OPEN_MB).",
+      () => host.openBytes,
+    ),
+  );
   registry.add(
     new Sampled("niro_rooms_read_only", "gauge", "Open boards that reached a limit.", () => {
       let count = 0;
@@ -233,7 +265,14 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     res.writeHead(404).end();
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.documentBytes * 2 });
+  // Two servers, because ws checks a message's size only against its server's
+  // `maxPayload`, and buffers the whole message before anyone else sees it.
+  // Editors may send a whole board once, as their catch-up. Viewers' changes
+  // are refused anyway, so nothing they send needs to be bigger than a live
+  // message: past that, ws closes them before buffering more.
+  const editors = new WebSocketServer({ noServer: true, maxPayload: limits.documentBytes * 2 });
+  const viewers = new WebSocketServer({ noServer: true, maxPayload: limits.messageBytes });
+  const clients = () => [...editors.clients, ...viewers.clients];
 
   // Checked before the upgrade, so a refused client costs one HTTP response.
   // Browsers can't read the status, so the client learns of a bad link from
@@ -247,8 +286,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       metrics.rejected.inc({ reason });
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
     };
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== "/ws") return refuse("404 Not Found", "not_found");
+    const url = requestUrl(req);
+    if (url?.pathname !== "/ws") return refuse("404 Not Found", "not_found");
     if (url.searchParams.get("v") !== String(PROTOCOL_VERSION))
       return refuse("400 Bad Request", "bad_request");
     const boardId = url.searchParams.get("board") ?? "";
@@ -258,9 +297,15 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     if (closing) return refuse("503 Service Unavailable", "shutting_down");
     const count = connections.get(boardId) ?? 0;
     if (count >= limits.connectionsPerRoom) return refuse("503 Service Unavailable", "room_full");
+    if (connectionCount >= limits.connections)
+      return refuse("503 Service Unavailable", "server_full");
+    if (!host.isOpen(boardId) && host.openBytes >= limits.openBytes)
+      return refuse("503 Service Unavailable", "server_full");
 
     connections.set(boardId, count + 1);
+    connectionCount++;
     const unreserve = () => {
+      connectionCount--;
       const left = (connections.get(boardId) ?? 1) - 1;
       if (left > 0) connections.set(boardId, left);
       else connections.delete(boardId);
@@ -284,6 +329,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
             unreserve();
           };
           socket.once("close", abandoned);
+          const wss = grant.role === "edit" ? editors : viewers;
           wss.handleUpgrade(req, socket, head, (ws) => {
             upgraded = true;
             socket.off("close", abandoned);
@@ -342,9 +388,10 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       }
       metrics.messagesIn.inc();
       metrics.bytesIn.inc({}, data.length);
-      // The first catch-up can be the whole board: it's exempt from the
-      // size and rate limits. Everything after it is a live change, or cursors.
-      if (!caughtUp && isSyncStep2(data)) {
+      // An editor's first catch-up can be the whole board: it's exempt from
+      // the size and rate limits. Everything after it is a live change, or
+      // cursors. A viewer's catch-up would be refused, so it gets no exemption.
+      if (!caughtUp && role === "edit" && isSyncStep2(data)) {
         caughtUp = true;
       } else if (data.length > limits.messageBytes) {
         // The client reconnects and sends it again as part of its catch-up.
@@ -367,7 +414,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   // A browser that vanished (lid closed, network gone) sends no close frame.
   // Pings find it; the dropped connection then leaves its room.
   const pinger = setInterval(() => {
-    for (const ws of wss.clients) {
+    for (const ws of clients()) {
       if (!alive.get(ws)) {
         metrics.dropped.inc({ reason: "unresponsive" });
         ws.terminate();
@@ -395,8 +442,10 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     async close() {
       closing = true;
       clearInterval(pinger);
-      for (const client of wss.clients) client.close(1001, "server shutting down");
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      for (const client of clients()) client.close(1001, "server shutting down");
+      await Promise.all(
+        [editors, viewers].map((wss) => new Promise<void>((resolve) => wss.close(() => resolve()))),
+      );
       await host.close();
       if (!http.listening) return;
       await new Promise<void>((resolve, reject) =>
@@ -434,6 +483,15 @@ function bearerMatches(req: IncomingMessage, token: string): boolean {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-function pathname(req: IncomingMessage): string {
-  return new URL(req.url ?? "/", "http://localhost").pathname;
+/**
+ * The request's URL, or null if it doesn't parse. A request line like
+ * `GET //[ HTTP/1.1` passes Node's parser but makes `new URL` throw, and a
+ * throw in these handlers would take the whole server down.
+ */
+function requestUrl(req: IncomingMessage): URL | null {
+  return URL.parse(req.url ?? "/", "http://localhost");
+}
+
+function pathname(req: IncomingMessage): string | undefined {
+  return requestUrl(req)?.pathname;
 }
