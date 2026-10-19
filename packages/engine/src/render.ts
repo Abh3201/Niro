@@ -3,7 +3,7 @@ import { PEN_SIZE } from "./freehand";
 import { type Box, boxFromPoints, rotateAround, unionBoxes } from "./geometry";
 import { reactionsExtent } from "./reactions";
 import { shapeCenter, shapeExtent } from "./shapes";
-import { FONT_FAMILY, inkColor, LINE_HEIGHT, type TextLayout } from "./text";
+import { FONT_FAMILY, inkColor, LINE_HEIGHT, MEASURE_SIZE, type TextLayout } from "./text";
 
 export interface Palette {
   /** Shape fills and line strokes. */
@@ -280,11 +280,26 @@ function drawText(
     return;
   }
 
-  ctx.font = `${fontSize}px ${FONT_FAMILY}`;
+  // Set at the size it was measured at and scaled down, so each line is as
+  // wide as `measure` said (see text.ts). `maxWidth` squeezes a line that
+  // still comes out wider, rather than letting it run out of its shape.
+  // Scaling back after is cheaper than save and restore, which add up when
+  // thousands of notes are on screen.
+  const k = fontSize / MEASURE_SIZE;
+  ctx.scale(k, k);
+  ctx.font = `${MEASURE_SIZE}px ${FONT_FAMILY}`;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   lines.forEach((line, i) => {
     if (line.trim() !== "")
-      ctx.fillText(line, left(i), layout.y + i * lineHeight + baseline * fontSize);
+      ctx.fillText(
+        line,
+        left(i) / k,
+        (layout.y + i * lineHeight + baseline * fontSize) / k,
+        // A line can't be wider than the room right of where it starts, unless
+        // it's one character that never fit.
+        Math.max(widths[i] ?? 0, layout.x + layout.width - left(i)) / k,
+      );
   });
+  ctx.scale(1 / k, 1 / k);
 }

@@ -10,6 +10,7 @@ import { loadUserId } from "./presence";
 import { SelectionPanel } from "./SelectionPanel";
 import { ShortcutsHelp, useHelpKey } from "./ShortcutsHelp";
 import { Toolbar } from "./Toolbar";
+import { engineScheme, getThemeChoice, useThemeChoice } from "./theme";
 import { useEngineState } from "./useEngineState";
 import { ZoomControls } from "./ZoomControls";
 
@@ -32,6 +33,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
   const openHelp = useCallback(() => setHelpOpen(true), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
   useHelpKey(openHelp);
+  const theme = useThemeChoice();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -50,6 +52,8 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
           onPointerMove: board.presence.pointerMoved,
           loadImage: board.assets.load,
           userId: loadUserId(),
+
+          colorScheme: engineScheme(getThemeChoice()),
         });
         const detach = board.presence.attach(engine);
         setSession({ engine, board });
@@ -142,6 +146,11 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
     const timer = setTimeout(() => setImageNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [imageNotice]);
+
+  // The page's colors have already switched (see setThemeChoice); now the canvas.
+  useEffect(() => {
+    session?.engine.setColorScheme(engineScheme(theme));
+  }, [session, theme]);
 
   return (
     <>

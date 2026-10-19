@@ -2,6 +2,7 @@ export { benchmarkBoard } from "./bench-board";
 export * from "./camera";
 export { backingStoreSize } from "./canvas";
 export {
+  type ColorScheme,
   createEngine,
   type Engine,
   type EngineOptions,

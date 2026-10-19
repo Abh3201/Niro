@@ -1,11 +1,19 @@
 import type { Engine } from "@niro/engine";
+import { MoonIcon, SunIcon } from "./icons";
+import { setThemeChoice, useDarkTheme } from "./theme";
 import { useEngineState } from "./useEngineState";
+import { usePrefersDark } from "./usePrefersDark";
 
-/** Zoom out / current zoom (click to reset) / zoom in, and the shortcuts list. */
+/** Zoom out / current zoom (click to reset) / zoom in, the light/dark switch and the shortcuts list. */
 export function ZoomControls({ engine, onHelp }: { engine: Engine; onHelp: () => void }) {
   // Select just the zoom level, so panning doesn't re-render this component.
   const zoom = useEngineState(engine, (s) => s.camera.zoom, 1);
   const percent = Math.round(zoom * 100);
+  const dark = useDarkTheme();
+  const systemDark = usePrefersDark();
+  // Switching back to what the system uses goes back to following it.
+  const toggleTheme = () =>
+    setThemeChoice(!dark === systemDark ? "system" : dark ? "light" : "dark");
 
   return (
     <div className="panel zoom-controls" role="toolbar" aria-label="Zoom">
@@ -30,6 +38,16 @@ export function ZoomControls({ engine, onHelp }: { engine: Engine; onHelp: () =>
         +
       </button>
       <span className="divider" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={toggleTheme}
+        aria-pressed={dark}
+        aria-label="Dark board"
+        title={dark ? "Switch to a light board" : "Switch to a dark board"}
+        data-testid="theme-toggle"
+      >
+        {dark ? <SunIcon /> : <MoonIcon />}
+      </button>
       <button
         type="button"
         onClick={onHelp}

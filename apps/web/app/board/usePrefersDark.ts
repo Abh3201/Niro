@@ -8,7 +8,7 @@ function subscribe(onChange: () => void) {
   return () => media.removeEventListener("change", onChange);
 }
 
-/** Follows the system color scheme, like the engine and the CSS do. */
+/** Follows the system color scheme. Boards use it unless a theme was chosen (see theme.ts). */
 export function usePrefersDark(): boolean {
   return useSyncExternalStore(
     subscribe,

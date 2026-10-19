@@ -124,7 +124,11 @@ export interface EngineOptions {
    * user can't react.
    */
   userId?: string;
+  /** Light or dark board; null or absent follows the system setting. See `Engine.setColorScheme`. */
+  colorScheme?: ColorScheme | null;
 }
+
+export type ColorScheme = "light" | "dark";
 
 export interface FrameStats {
   /** Time spent in the frame's JavaScript, in ms. */
@@ -178,6 +182,12 @@ export interface Engine {
    * there's nothing to export.
    */
   exportImage(format: "png" | "svg"): Promise<Blob | null>;
+  /**
+   * Draws the board light or dark, or with null, as the system setting says.
+   * The page's CSS has to switch with it: the grid's dots are the
+   * container's `--grid-dot` color, read when this is called.
+   */
+  setColorScheme(scheme: ColorScheme | null): void;
   /** Marks everything as changed; it is redrawn once, on the next animation frame. */
   invalidate(): void;
   /** Stops rendering and removes everything the engine added to the page. */
@@ -285,8 +295,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
   let cameraPlaced = options.camera !== undefined;
   let pixelRatio = window.devicePixelRatio || 1;
-  const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
-  let theme = readTheme(container, colorScheme.matches);
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+  let colorScheme = options.colorScheme ?? null;
+  const isDark = () => (colorScheme ?? (systemDark.matches ? "dark" : "light")) === "dark";
+  let theme = readTheme(container, isDark());
   let frame: number | null = null;
   let pendingWrite: (() => void) | null = null;
   const listeners = new Set<() => void>();
@@ -954,14 +966,14 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   const onColorSchemeChange = () => {
-    theme = readTheme(container, colorScheme.matches);
+    theme = readTheme(container, isDark());
     markAllDirty();
   };
 
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   watchPixelRatio();
-  colorScheme.addEventListener("change", onColorSchemeChange);
+  systemDark.addEventListener("change", onColorSchemeChange);
   resize();
 
   const input: InputController = new InputController({
@@ -1023,6 +1035,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       const svg = exportSvg(input);
       return Promise.resolve(svg === null ? null : new Blob([svg], { type: "image/svg+xml" }));
     },
+    setColorScheme(scheme) {
+      colorScheme = scheme;
+      onColorSchemeChange();
+    },
     invalidate: markAllDirty,
     destroy() {
       interaction.cancel();
@@ -1034,7 +1050,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       container.removeEventListener("pointerdown", focusBoard);
       observer.disconnect();
       pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);
-      colorScheme.removeEventListener("change", onColorSchemeChange);
+      systemDark.removeEventListener("change", onColorSchemeChange);
       if (frame !== null) cancelAnimationFrame(frame);
       for (const layer of layers) layer.destroy();
       listeners.clear();

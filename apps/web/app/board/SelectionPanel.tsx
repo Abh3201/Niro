@@ -10,8 +10,8 @@ import {
   TrashIcon,
   UngroupIcon,
 } from "./icons";
+import { useDarkTheme } from "./theme";
 import { useEngineState } from "./useEngineState";
-import { usePrefersDark } from "./usePrefersDark";
 
 const NO_SELECTION: readonly string[] = [];
 const NO_REACTIONS: readonly ReactionSummary[] = [];
@@ -28,7 +28,7 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
   const reactions = useEngineState(engine, (s) => s.selectionReactions, NO_REACTIONS);
   // Swatches show each color the way the board draws it in this theme.
-  const palette = usePrefersDark() ? DARK_PALETTE : LIGHT_PALETTE;
+  const palette = useDarkTheme() ? DARK_PALETTE : LIGHT_PALETTE;
   if (selection.length === 0 || readOnly) return null;
 
   return (
