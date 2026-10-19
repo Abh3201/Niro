@@ -90,7 +90,10 @@ export function strokeOutline(points: readonly PenPoint[], last = true): Point[]
 }
 
 /** Traces a stroke outline into `path`, smoothed with curves through the midpoints. */
-export function traceOutline(path: CanvasPath, outline: readonly Point[]): void {
+export function traceOutline(
+  path: Pick<CanvasPath, "moveTo" | "quadraticCurveTo" | "closePath">,
+  outline: readonly Point[],
+): void {
   const n = outline.length;
   const first = outline[0];
   if (!first || n < 3) return;

@@ -19,6 +19,7 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Undo, redo | Ctrl/Cmd + `Z`, Ctrl/Cmd + Shift + `Z` or Ctrl + `Y`, or the buttons under the toolbar |
 | Pan | Scroll, two-finger trackpad scroll, space + drag, middle-button drag, the hand tool, or one finger on empty space on a touch screen |
 | Zoom | Ctrl/Cmd + scroll, trackpad pinch, two-finger pinch on touch screens, or the buttons bottom-right. Ctrl/Cmd + `=`, `-`, `0` step in, out and back to 100% |
+| Export | `PNG` or `SVG` bottom-right downloads the selection, or the whole board when nothing is selected, in light colors on white |
 | Share | **Share**, top right: an edit link and a view-only link, and your name as others see it. Whoever has a link has that access; there are no accounts |
 
 ## Run it with Docker

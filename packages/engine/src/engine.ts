@@ -18,14 +18,16 @@ import {
   worldToScreen,
   zoomAt,
 } from "./camera";
+import { exportPng, exportSvg } from "./export";
 import { StrokePaths, strokeOutline, traceOutline } from "./freehand";
 import type { Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
 import { InputController } from "./input";
 import { type EditorHost, Interaction, type ToolName } from "./interaction";
 import { Layer } from "./layers";
+import { paintShapes } from "./paint";
 import { type RemotePeer, SmoothedCursors } from "./presence";
-import { DARK_PALETTE, drawnExtent, drawShape, LIGHT_PALETTE, type Palette } from "./render";
+import { DARK_PALETTE, drawnExtent, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
 import { HANDLE_SIZE, placeHandles } from "./selection";
 import { shapeCenter, shapeOutline } from "./shapes";
@@ -129,6 +131,12 @@ export interface Engine {
   setPeers(peers: readonly RemotePeer[]): void;
   undo(): void;
   redo(): void;
+  /**
+   * The selection, or the whole board when nothing is selected, as a PNG or
+   * an SVG image: light colors on white, whatever the theme. Null when
+   * there's nothing to export.
+   */
+  exportImage(format: "png" | "svg"): Promise<Blob | null>;
   /** Marks everything as changed; it is redrawn once, on the next animation frame. */
   invalidate(): void;
   /** Stops rendering and removes everything the engine added to the page. */
@@ -147,6 +155,8 @@ const FRAME_MS = 1000 / 60;
 const CURSOR_SETTLE_PX = 0.25;
 /** Longest remote name drawn on a cursor label. */
 const MAX_LABEL_CHARS = 24;
+/** Behind exported images. */
+const EXPORT_BACKGROUND = "#ffffff";
 /** Shown in place of a frame's name until it has one. */
 const FRAME_PLACEHOLDER = "Frame";
 /** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
@@ -383,36 +393,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       const scale = pr * camera.zoom;
       ctx.setTransform(scale, 0, 0, scale, -camera.x * scale, -camera.y * scale);
       const editing = editor.editing;
-      // Shapes in frames are cut off at each frame's edges. Shapes in the
-      // same frames share one list, so the clip changes only between frames.
-      let clipped: readonly ShapeId[] = [];
-      for (const shape of scene.visible(visibleBounds(camera, viewport))) {
-        const frames = scene.framesAround(shape.id);
-        if (frames !== clipped) {
-          if (clipped.length > 0) ctx.restore();
-          if (frames.length > 0) {
-            ctx.save();
-            for (const id of frames) {
-              const frame = scene.get(id);
-              if (!frame) continue;
-              ctx.beginPath();
-              ctx.rect(frame.x, frame.y, frame.w, frame.h);
-              ctx.clip();
-            }
-          }
-          clipped = frames;
-        }
+      drawn = paintShapes(ctx, scene.visible(visibleBounds(camera, viewport)), {
+        scene,
+        palette: theme.palette,
+        zoom: camera.zoom,
+        baseline: fonts.baseline,
         // The editor shows the text of the shape being edited.
-        const layout = shape.id === editing ? undefined : textLayout(shape);
-        const text = layout && { layout, baseline: fonts.baseline, zoom: camera.zoom };
-        const stroke = shape.type === "freehand" ? strokes.get(shape) : undefined;
-        drawShape(ctx, shape, theme.palette, camera.zoom, {
-          ...(text && { text }),
-          ...(stroke && { stroke }),
-        });
-        drawn++;
-      }
-      if (clipped.length > 0) ctx.restore();
+        textLayout: (shape) => (shape.id === editing ? undefined : textLayout(shape)),
+        stroke: (shape) => strokes.get(shape),
+      });
       shapes.dirty = false;
       // Shapes or the camera moved: the editor moves with them.
       editor.update();
@@ -848,6 +837,20 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setPeers,
     undo,
     redo,
+    exportImage(format) {
+      const input = {
+        scene,
+        ids: state.selection.length > 0 ? state.selection : null,
+        palette: LIGHT_PALETTE,
+        background: EXPORT_BACKGROUND,
+        baseline: fonts.baseline,
+        textLayout,
+        stroke: (shape: Shape) => strokes.get(shape),
+      };
+      if (format === "png") return exportPng(input);
+      const svg = exportSvg(input);
+      return Promise.resolve(svg === null ? null : new Blob([svg], { type: "image/svg+xml" }));
+    },
     invalidate: markAllDirty,
     destroy() {
       interaction.cancel();
