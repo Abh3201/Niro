@@ -10,6 +10,13 @@ import type { Palette } from "./render";
  * that is arithmetic. That is what makes fitting text to a sticky note (try
  * a size, wrap, see if it fits, try again) cheap enough to redo on every
  * keystroke.
+ *
+ * That arithmetic only holds if text is also drawn at the reference size,
+ * scaled down. Widths don't scale with font size: fonts with optical sizes,
+ * like the system font on macOS (SF Pro), switch to wider letters at small
+ * sizes, so 20px text set as wide as `measure` said was ~10% wider on screen
+ * and ran out of its shape. Drawing at `MEASURE_SIZE` and scaling makes the
+ * drawn width the measured one, whatever the font does.
  */
 
 export const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -23,6 +30,8 @@ export const FRAME_LABEL_SIZE = 14;
 export const FRAME_LABEL_GAP = 6;
 /** Height of the strip above a frame where its name's last line is: where a click picks the frame. */
 export const FRAME_LABEL_HEIGHT = FRAME_LABEL_SIZE * LINE_HEIGHT + FRAME_LABEL_GAP;
+/** Font size, in pixels, text is measured, drawn and edited at, then scaled to its real size. */
+export const MEASURE_SIZE = 100;
 /** Width a text shape gets when it's created with a click. */
 export const DEFAULT_TEXT_WIDTH = 240;
 /** Most characters the editor takes in one shape: a board is for notes, not novels. */
@@ -239,7 +248,7 @@ export interface FontMetrics {
 
 /** Measures with a canvas at a 100px reference size, remembering each string. */
 export function canvasFontMetrics(): FontMetrics {
-  const REFERENCE = 100;
+  const REFERENCE = MEASURE_SIZE;
   const ctx = document.createElement("canvas").getContext("2d");
   const widths = new Map<string, number>();
   let ascent = 0.9;
