@@ -12,3 +12,4 @@ test-results/
 *.log
 bench-results.json
 out/
+*.PublishSettings
