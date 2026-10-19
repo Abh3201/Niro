@@ -12,6 +12,10 @@
   },
   "dependencies": {
     "@niro/doc": "workspace:*",
-    "perfect-freehand": "^1.2.3"
+    "perfect-freehand": "^1.2.3",
+    "rbush": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/rbush": "^4.0.0"
   }
 }

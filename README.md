@@ -2,7 +2,7 @@
 
 An open source, self-hostable whiteboard in the spirit of Miro, and a project for learning, from first principles, how canvas rendering, real-time collaboration and network transports work.
 
-**Status:** P4 (content). Sticky notes, rectangles, ellipses, lines, arrows, pen strokes and text you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo; text in every box shape; arrows that stay attached to the shapes they connect; groups, and frames that hold and clip what's in them. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts.
+**Status:** P5 (performance). Sticky notes, rectangles, ellipses, lines, arrows, pen strokes and text you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo; text in every box shape; arrows that stay attached to the shapes they connect; groups, and frames that hold and clip what's in them. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts. A 10,000-shape board pans in about 5 ms a frame at 100% (measured; see [the performance notes](docs/learning/performance.md)).
 
 | To | Do |
 |---|---|
@@ -60,17 +60,19 @@ In development both servers use a built-in secret; set `NIRO_SECRET` to use your
 | `pnpm test` | Unit tests (Vitest) |
 | `pnpm build` | Production builds of the web app and realtime server |
 | `pnpm e2e` | Browser tests (Playwright) against the production build; run `pnpm build` first |
+| `pnpm bench` | Frame times on a seeded 10,000-shape board, written to `bench-results.json`; run `pnpm build` first |
 
 ## Layout
 
 ```
 apps/web          React Router v8 app: the board UI and HTTP API
 apps/realtime     WebSocket server: rooms, sync, presence, persistence
+apps/bench        Rendering benchmark: the engine on a seeded 10,000-shape board, timed by Playwright
 packages/engine   Framework-free canvas engine (no React, no Yjs)
 packages/doc      Document model: shape types, DocStore, z-order and tree rules; Yjs adapter in @niro/doc/yjs
 packages/sync     Realtime sync on Yjs: the server's Room and RoomHost (loading, saving, limits), the browser's SyncClient, share-link keys and tokens
 packages/netsim   Deterministic simulated network for fault-injection tests
-labs/             Learning labs: L2 WebSocket from scratch, L3 own sync, L6 Yjs vs Loro
+labs/             Learning labs: L2 WebSocket from scratch, L3 own sync, L4 toy CRDTs, L6 Yjs vs Loro
 docs/decisions    Decision records, with the evidence behind them
 docs/learning     Write-ups from the learning labs
 ```
@@ -91,8 +93,8 @@ Two rules keep the architecture honest:
 | P2 | Document model and shapes, selection, z-order, undo (after a Yjs vs Loro spike) |
 | P3a | Multiplayer: rooms, sync, live cursors, share links |
 | P3b | Persistence, limits, network-fault simulation tests, metrics |
-| **P4** | Text, pen, arrows, groups and frames |
-| P5 | Performance: spatial index, culling, level of detail |
+| P4 | Text, pen, arrows, groups and frames |
+| **P5** | Performance: spatial index, culling, level of detail |
 | P6 | v0.1 release |
 
 ## License

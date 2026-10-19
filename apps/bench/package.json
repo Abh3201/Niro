@@ -1,0 +1,20 @@
+{
+  "name": "@niro/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Rendering benchmark: the engine on a seeded 10,000-shape board, driven by Playwright.",
+  "scripts": {
+    "build": "vite build",
+    "serve": "vite preview --port 3100 --strictPort",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@niro/doc": "workspace:*",
+    "@niro/engine": "workspace:*",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

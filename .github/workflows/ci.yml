@@ -53,6 +53,19 @@ jobs:
           name: playwright-report
           path: playwright-report
           retention-days: 7
+      # Frame times on the 10,000-shape benchmark board, for comparing runs.
+      # Never fails the build: shared runners (with software rendering) are
+      # too noisy to hold a threshold. The table goes in the job summary.
+      - name: Frame times (recorded, not checked)
+        run: pnpm bench
+        continue-on-error: true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results.json
+          if-no-files-found: ignore
+          retention-days: 90
 
   compose:
     name: Docker compose smoke test

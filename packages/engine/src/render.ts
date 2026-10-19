@@ -1,5 +1,7 @@
 import { type ColorName, isLinear, type Shape } from "@niro/doc";
-import { shapeCenter } from "./shapes";
+import { PEN_SIZE } from "./freehand";
+import { type Box, boxFromPoints, rotateAround, unionBoxes } from "./geometry";
+import { shapeCenter, shapeExtent } from "./shapes";
 import { FONT_FAMILY, inkColor, LINE_HEIGHT, type TextLayout } from "./text";
 
 export interface Palette {
@@ -58,6 +60,42 @@ const STICKY_SHADOW = "rgba(0, 0, 0, 0.14)";
 /** Text smaller than this on screen, in CSS pixels, is drawn as bars: unreadable anyway, and much cheaper. */
 const GREEK_BELOW_PX = 4;
 
+/**
+ * The box `drawShape` draws `shape` in, given its text's layout (if it's
+ * drawn with text): anything outside it is off screen when the box is.
+ */
+export function drawnExtent(shape: Shape, layout?: TextLayout): Box {
+  const box = shapeExtent(shape);
+  const pad = isLinear(shape.type)
+    ? // Round caps, and an arrowhead's wings.
+      ARROWHEAD
+    : shape.type === "freehand"
+      ? // The stroke is a fixed width however the box is scaled.
+        PEN_SIZE
+      : shape.type === "sticky"
+        ? // The shadow.
+          Math.min(shape.w, shape.h) * 0.04
+        : // A frame's 1-unit edge, and anti-aliasing.
+          1;
+  const padded = {
+    minX: box.minX - pad,
+    minY: box.minY - pad,
+    maxX: box.maxX + pad,
+    maxY: box.maxY + pad,
+  };
+  if (!layout || layout.lines.length === 0) return padded;
+  // Text is laid out in the shape's own frame, and turns with it.
+  const c = shapeCenter(shape);
+  const height = layout.lines.length * layout.fontSize * LINE_HEIGHT;
+  const corners = [
+    { x: layout.x, y: layout.y },
+    { x: layout.x + layout.width, y: layout.y },
+    { x: layout.x + layout.width, y: layout.y + height },
+    { x: layout.x, y: layout.y + height },
+  ].map((p) => rotateAround({ x: c.x + p.x, y: c.y + p.y }, c, shape.rotation));
+  return unionBoxes([padded, boxFromPoints(corners)]) ?? padded;
+}
+
 /** A shape's text, laid out, and how to draw it. */
 export interface ShapeText {
   readonly layout: TextLayout;
@@ -74,14 +112,21 @@ export interface ShapeExtras {
   readonly stroke?: Path2D;
 }
 
+/** Below this size on screen, in CSS pixels, a sticky note has no shadow: it would be a smudge. */
+const SHADOW_ABOVE_PX = 16;
+/** Text smaller than this on screen isn't drawn at all: even its bars would be under a pixel. */
+const HIDE_TEXT_BELOW_PX = 2.5;
+
 /**
  * Draws one shape, and its text when it has some. Expects the context to
- * be transformed to world coordinates.
+ * be transformed to world coordinates; `zoom` is screen pixels per world
+ * unit, for leaving out detail too small to see.
  */
 export function drawShape(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
   palette: Palette,
+  zoom: number,
   extras: ShapeExtras = {},
 ): void {
   if (isLinear(shape.type)) {
@@ -91,50 +136,68 @@ export function drawShape(
 
   const { w, h, rotation } = shape;
   const c = shapeCenter(shape);
-  ctx.save();
-  ctx.translate(c.x, c.y);
-  if (rotation !== 0) ctx.rotate(rotation);
+  // Upright shapes, nearly all of them, are drawn where they are. Moving the
+  // context to each shape's center (save, translate, restore) costs more
+  // than drawing a rectangle, thousands of times a frame when zoomed out.
+  const turned = rotation !== 0;
+  if (turned) {
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(rotation);
+  }
+  // The center, in whatever the context is now.
+  const cx = turned ? 0 : c.x;
+  const cy = turned ? 0 : c.y;
+  const left = cx - w / 2;
+  const top = cy - h / 2;
   switch (shape.type) {
     case "rectangle":
       ctx.fillStyle = palette.solid[shape.color];
-      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.fillRect(left, top, w, h);
       break;
     case "ellipse":
       ctx.fillStyle = palette.solid[shape.color];
       ctx.beginPath();
-      ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       break;
     case "sticky": {
-      // An offset rectangle is a much cheaper shadow than `shadowBlur`.
-      const offset = Math.min(w, h) * 0.02;
-      ctx.fillStyle = STICKY_SHADOW;
-      ctx.fillRect(-w / 2 + offset, -h / 2 + offset * 2, w, h);
+      if (Math.min(w, h) * zoom >= SHADOW_ABOVE_PX) {
+        // An offset rectangle is a much cheaper shadow than `shadowBlur`.
+        const offset = Math.min(w, h) * 0.02;
+        ctx.fillStyle = STICKY_SHADOW;
+        ctx.fillRect(left + offset, top + offset * 2, w, h);
+      }
       ctx.fillStyle = palette.paper[shape.color];
-      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.fillRect(left, top, w, h);
       break;
     }
     case "freehand":
       if (extras.stroke) {
+        // The outline is in the stroke's own frame.
+        ctx.translate(cx, cy);
         ctx.fillStyle = palette.solid[shape.color];
         ctx.fill(extras.stroke);
+        ctx.translate(-cx, -cy);
       }
       break;
     case "frame":
       // Grey, the default, is the plain surface.
       ctx.fillStyle = shape.color === "grey" ? palette.frame.fill : palette.paper[shape.color];
-      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.fillRect(left, top, w, h);
       ctx.strokeStyle = palette.frame.border;
       ctx.lineWidth = 1;
-      ctx.strokeRect(-w / 2, -h / 2, w, h);
+      ctx.strokeRect(left, top, w, h);
       break;
     case "text":
     case "group":
       // Just the text; groups draw nothing of their own.
       break;
   }
-  if (extras.text) drawText(ctx, extras.text, inkColor(shape, palette));
-  ctx.restore();
+  const { text } = extras;
+  if (text && text.layout.fontSize * zoom >= HIDE_TEXT_BELOW_PX)
+    drawText(ctx, text, inkColor(shape, palette), cx, cy);
+  if (turned) ctx.restore();
 }
 
 /** Length of an arrowhead, in world units; narrower arrows get smaller heads. */
@@ -169,9 +232,16 @@ function drawLine(ctx: CanvasRenderingContext2D, shape: Shape, color: string): v
   ctx.fill();
 }
 
-/** Draws laid-out text, in the shape's own frame. */
-function drawText(ctx: CanvasRenderingContext2D, text: ShapeText, ink: string): void {
-  const { layout, baseline, zoom } = text;
+/** Draws laid-out text, centered on `(cx, cy)`: the shape's center. */
+function drawText(
+  ctx: CanvasRenderingContext2D,
+  text: ShapeText,
+  ink: string,
+  cx: number,
+  cy: number,
+): void {
+  const { baseline, zoom } = text;
+  const layout = { ...text.layout, x: text.layout.x + cx, y: text.layout.y + cy };
   const { fontSize, lines, widths } = layout;
   const lineHeight = fontSize * LINE_HEIGHT;
   const left = (i: number) =>
