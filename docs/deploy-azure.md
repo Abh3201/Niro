@@ -100,7 +100,34 @@ Open `https://$WEB.azurewebsites.net`. You get a new board; its address is the e
 
 ## Updating
 
-Pull the new version, run `./deploy/azure/package.sh` again, and repeat the two `az webapp deploy` lines. Read [CHANGELOG.md](../CHANGELOG.md) first.
+Pull the new version, run `./deploy/azure/package.sh` again, and repeat the two `az webapp deploy` lines, realtime first. Or let GitHub do it: see the next section. Read [CHANGELOG.md](../CHANGELOG.md) first.
+
+## Deploy automatically from GitHub
+
+[`.github/workflows/deploy-azure.yml`](../.github/workflows/deploy-azure.yml) builds both packages and deploys them each time CI passes on `main`, realtime server first. It does nothing until you set it up, and you can also run it by hand from the **Actions** tab (**Deploy to Azure**, **Run workflow**).
+
+It signs in with each app's publish profile, which needs basic authentication turned on for deployments (new apps may have it off). Run this once, with the names from step 3:
+
+```sh
+for app in $RT $WEB; do
+  az resource update --resource-group $RG --namespace Microsoft.Web \
+    --resource-type basicPublishingCredentialsPolicies --parent sites/$app --name scm \
+    --set properties.allow=true
+done
+az webapp deployment list-publishing-profiles --resource-group $RG --name $RT --xml > realtime.PublishSettings
+az webapp deployment list-publishing-profiles --resource-group $RG --name $WEB --xml > web.PublishSettings
+```
+
+Then, in the repository on GitHub, **Settings**, **Secrets and variables**, **Actions**:
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `AZURE_PUBLISH_PROFILE_REALTIME` | the whole of `realtime.PublishSettings` |
+| Secret | `AZURE_PUBLISH_PROFILE_WEB` | the whole of `web.PublishSettings` |
+| Variable | `AZURE_WEBAPP_REALTIME` | the realtime app's name (`$RT`) |
+| Variable | `AZURE_WEBAPP_WEB` | the web app's name (`$WEB`) |
+
+Delete the two `.PublishSettings` files afterwards: each is a password for its app. App settings such as `NIRO_SECRET` stay in Azure; the workflow only uploads code.
 
 ## Keep NIRO_SECRET
 
