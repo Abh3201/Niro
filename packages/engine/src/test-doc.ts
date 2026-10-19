@@ -39,6 +39,19 @@ export function memoryDoc(initial: readonly Shape[] = []): DocStore {
           shapes.set(id, shape);
           changes.push({ kind: "updated", shape, previous });
         },
+        react(id, reaction, user, on) {
+          const previous = shapes.get(id);
+          if (!previous) return;
+          const users = previous.reactions?.[reaction] ?? [];
+          if (users.includes(user) === on) return;
+          const next = on ? [...users, user].sort() : users.filter((u) => u !== user);
+          const { [reaction]: _, ...others } = previous.reactions ?? {};
+          const reactions = next.length > 0 ? { ...others, [reaction]: next } : others;
+          const { reactions: __, ...rest } = previous;
+          const shape: Shape = Object.keys(reactions).length > 0 ? { ...rest, reactions } : rest;
+          shapes.set(id, shape);
+          changes.push({ kind: "updated", shape, previous });
+        },
         remove(id) {
           const previous = shapes.get(id);
           if (!previous) return;

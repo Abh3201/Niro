@@ -4,6 +4,9 @@ import {
   type DocStore,
   holdsText,
   isLinear,
+  newShapeId,
+  REACTION_NAMES,
+  type ReactionName,
   type Shape,
   type ShapeId,
 } from "@niro/doc";
@@ -23,6 +26,7 @@ import { exportPng, exportSvg } from "./export";
 import { StrokePaths, strokeOutline, traceOutline } from "./freehand";
 import type { Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
+import { ImageCache, type ImageLoader } from "./images";
 import { InputController } from "./input";
 import { type EditorHost, Interaction, type ToolName } from "./interaction";
 import { Layer } from "./layers";
@@ -37,6 +41,7 @@ import {
   group,
   movers,
   outermost,
+  placeNew,
   remove,
   reorder,
   reparentOnMove,
@@ -78,6 +83,21 @@ export interface EngineState {
   readonly editing: ShapeId | null;
   /** Words for the selected shape, for screen readers; empty unless one shape is selected. */
   readonly selectionLabel: string;
+  /** Reactions on the selected shapes, added up; empty when nothing is selected. */
+  readonly selectionReactions: readonly ReactionSummary[];
+}
+
+/** One reaction on the selection: how many people gave it, and whether you did on every shape. */
+export interface ReactionSummary {
+  readonly reaction: ReactionName;
+  readonly count: number;
+  readonly mine: boolean;
+}
+
+/** An image's size in pixels, as the file has it. */
+export interface ImageSize {
+  readonly width: number;
+  readonly height: number;
 }
 
 export interface EngineOptions {
@@ -97,6 +117,13 @@ export interface EngineOptions {
    * rasterize them later, off the main thread.
    */
   onFrame?: (stats: FrameStats) => void;
+  /** Loads an image shape's picture from its file id. Without one, images draw as placeholders. */
+  loadImage?: ImageLoader;
+  /**
+   * This browser's id (see `USER_ID`), for reactions. Without one, this
+   * user can't react.
+   */
+  userId?: string;
 }
 
 export interface FrameStats {
@@ -128,6 +155,17 @@ export interface Engine {
   groupSelection(): void;
   /** Takes the selected groups apart, and selects what was in them. */
   ungroupSelection(): void;
+  /**
+   * Adds an image from a stored file, `size` pixels big at most (it's made
+   * smaller to fit on screen), centered on `at` (a point in the container,
+   * in CSS pixels) or on the middle of the screen, and selects it.
+   */
+  insertImage(asset: string, size: ImageSize, at?: Point): void;
+  /**
+   * Adds your reaction to every selected shape, or takes it off them all
+   * when every one already has it.
+   */
+  toggleReaction(reaction: ReactionName): void;
   /** Starts editing a shape's text, in place. Lines have none. */
   editText(id: ShapeId): void;
   /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
@@ -165,6 +203,8 @@ const FRAME_PLACEHOLDER = "Frame";
 /** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
 const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
+/** Largest share of the screen a new image takes up, across or down. */
+const IMAGE_SCREEN_SHARE = 0.6;
 
 /** The tools that work on a board that can't be edited. */
 const VIEW_TOOLS: ReadonlySet<ToolName> = new Set(["select", "hand"]);
@@ -241,6 +281,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     readOnly: doc.readOnly,
     editing: null,
     selectionLabel: "",
+    selectionReactions: [],
   };
   let cameraPlaced = options.camera !== undefined;
   let pixelRatio = window.devicePixelRatio || 1;
@@ -297,7 +338,24 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     canGroup: outermost(scene, ids).length >= 2,
     canUngroup: ids.some((id) => scene.get(id)?.type === "group"),
     selectionLabel: ids.length === 1 ? describeShape(scene, ids[0] as ShapeId) : "",
+    selectionReactions: summarizeReactions(ids),
   });
+
+  const summarizeReactions = (ids: readonly ShapeId[]): ReactionSummary[] => {
+    const selected = ids.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
+    const result: ReactionSummary[] = [];
+    for (const reaction of REACTION_NAMES) {
+      let count = 0;
+      let mine = selected.length > 0;
+      for (const shape of selected) {
+        const users = shape.reactions?.[reaction] ?? [];
+        count += users.length;
+        if (!options.userId || !users.includes(options.userId)) mine = false;
+      }
+      if (count > 0) result.push({ reaction, count, mine });
+    }
+    return result;
+  };
 
   const setSelection = (ids: readonly ShapeId[]) => {
     const next = [...new Set(ids)].filter((id) => scene.has(id));
@@ -306,6 +364,9 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setState({ ...state, selection: next, ...describe(next) });
     markDirty(overlay);
   };
+
+  const images = new ImageCache(options.loadImage, () => markDirty(shapes));
+  const imageOf = (shape: Shape) => images.get(shape.asset);
 
   const selectedShapes = (): Shape[] =>
     state.selection.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
@@ -422,6 +483,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         // The editor shows the text of the shape being edited.
         textLayout: (shape) => (shape.id === editing ? undefined : textLayout(shape)),
         stroke: (shape) => strokes.get(shape),
+        image: imageOf,
       });
       shapes.dirty = false;
       // Shapes or the camera moved: the editor moves with them.
@@ -683,6 +745,52 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setSelection(freed);
   };
 
+  const insertImage = (asset: string, size: ImageSize, at?: Point) => {
+    if (doc.readOnly || !(size.width > 0) || !(size.height > 0)) return;
+    const { camera, viewport } = state;
+    const center = screenToWorld(camera, at ?? viewportCenter());
+    // As big as the file, in screen pixels, unless that's more than fits.
+    const fit = Math.min(
+      1,
+      (viewport.width * IMAGE_SCREEN_SHARE) / size.width,
+      (viewport.height * IMAGE_SCREEN_SHARE) / size.height,
+    );
+    const w = Math.max(1, (size.width * fit) / camera.zoom);
+    const h = Math.max(1, (size.height * fit) / camera.zoom);
+    const draft: Shape = {
+      id: newShapeId(),
+      type: "image",
+      x: center.x - w / 2,
+      y: center.y - h / 2,
+      w,
+      h,
+      rotation: 0,
+      parentId: null,
+      index: "a0",
+      color: DEFAULT_COLOR.image,
+      text: "",
+      points: [],
+      from: null,
+      to: null,
+      asset,
+    };
+    const shape = { ...draft, ...placeNew(scene, draft) };
+    interaction.cancel();
+    command((tx) => tx.add(shape));
+    if (state.tool !== "select") setTool("select");
+    setSelection([shape.id]);
+  };
+
+  const toggleReaction = (reaction: ReactionName) => {
+    const user = options.userId;
+    const ids = state.selection;
+    if (!user || ids.length === 0 || doc.readOnly) return;
+    const on = !state.selectionReactions.some((r) => r.reaction === reaction && r.mine);
+    command((tx) => {
+      for (const id of ids) tx.react(id, reaction, user, on);
+    });
+  };
+
   function editText(id: ShapeId) {
     const shape = scene.get(id);
     if (!shape || !holdsText(shape.type) || doc.readOnly) return;
@@ -894,6 +1002,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     reorderSelection,
     groupSelection,
     ungroupSelection,
+    insertImage,
+    toggleReaction,
     editText,
     setPeers,
     undo,
@@ -907,6 +1017,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         baseline: fonts.baseline,
         textLayout,
         stroke: (shape: Shape) => strokes.get(shape),
+        image: imageOf,
       };
       if (format === "png") return exportPng(input);
       const svg = exportSvg(input);
@@ -919,6 +1030,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       input.destroy();
       unsubscribeDoc();
       shapeList.destroy();
+      images.destroy();
       container.removeEventListener("pointerdown", focusBoard);
       observer.disconnect();
       pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);

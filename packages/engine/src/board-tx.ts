@@ -1,4 +1,4 @@
-import type { DocStore, Shape, ShapeId, ShapePatch, Tx } from "@niro/doc";
+import type { DocStore, ReactionName, Shape, ShapeId, ShapePatch, Tx } from "@niro/doc";
 import type { Point } from "./geometry";
 import type { Scene } from "./scene";
 
@@ -30,6 +30,7 @@ class BoardTx implements Tx {
   private readonly updates = new Map<ShapeId, ShapePatch>();
   private readonly texts: Array<[ShapeId, number, number, string]> = [];
   private readonly removed = new Set<ShapeId>();
+  private readonly reactions: Array<[ShapeId, ReactionName, string, boolean]> = [];
   /** Where each shape is on the board once the batch is in, worked out as needed. */
   private readonly after = new Map<ShapeId, Point>();
   private readonly working = new Set<ShapeId>();
@@ -54,6 +55,10 @@ class BoardTx implements Tx {
     this.removed.add(id);
   }
 
+  react(id: ShapeId, reaction: ReactionName, user: string, on: boolean): void {
+    this.reactions.push([id, reaction, user, on]);
+  }
+
   commit(tx: Tx): void {
     for (const shape of this.added.values()) tx.add({ ...shape, ...this.stored(shape.id) });
     for (const [id, patch] of this.updates) {
@@ -68,6 +73,7 @@ class BoardTx implements Tx {
     }
     for (const [id, index, deleteCount, insert] of this.texts)
       tx.editText(id, index, deleteCount, insert);
+    for (const [id, reaction, user, on] of this.reactions) tx.react(id, reaction, user, on);
     for (const id of this.removed) tx.remove(id);
   }
 

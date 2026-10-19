@@ -14,6 +14,7 @@ export {
   reorderToEnd,
 } from "./order";
 export {
+  ASSET_ID,
   COLORS,
   type ColorName,
   DEFAULT_COLOR,
@@ -25,6 +26,11 @@ export {
   normalizeAngle,
   POINT_SCALE,
   PRESSURE_SCALE,
+  REACTION_NAMES,
+  REACTIONS,
+  type ReactionName,
+  type Reactions,
+  reactionKey,
   readShape,
   SCHEMA_VERSION,
   SHAPE_TYPES,
@@ -32,6 +38,7 @@ export {
   type ShapeId,
   type ShapePatch,
   type ShapeType,
+  USER_ID,
 } from "./shape";
 export type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
 export { effectiveParents } from "./tree";

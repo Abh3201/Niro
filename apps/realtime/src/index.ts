@@ -1,5 +1,6 @@
 import { type BoardStorage, MemoryStorage } from "@niro/sync";
 import { readSecret } from "@niro/sync/auth";
+import { type AssetStorage, MemoryAssets } from "./assets";
 import { limitsFromEnv } from "./config";
 import { PostgresStorage } from "./postgres";
 import { createRealtimeServer } from "./server";
@@ -15,6 +16,8 @@ const storage = await openStorage();
 const server = createRealtimeServer({
   secret,
   storage,
+  // Postgres keeps images in the same database; in memory, they go with the boards.
+  assets: storage instanceof PostgresStorage ? storage : (new MemoryAssets() as AssetStorage),
   limits,
   ...(process.env.METRICS_TOKEN ? { metricsToken: process.env.METRICS_TOKEN } : {}),
 });

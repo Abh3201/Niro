@@ -422,7 +422,7 @@ describe("YDocStore", () => {
   });
 
   it("opens a board from a newer version read-only, whatever this version is", () => {
-    expect(SCHEMA_VERSION).toBe(4);
+    expect(SCHEMA_VERSION).toBe(5);
     const doc = new Y.Doc();
     doc.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
     expect(createYDocStore(doc).readOnly).toBe(true);
@@ -491,5 +491,63 @@ describe("countShapes", () => {
     counter.destroy();
     store.transact((tx) => tx.add(rect("s6")));
     expect(counter.count).toBe(3);
+  });
+
+  it("keeps everyone's reactions when people react to one shape at once", () => {
+    const docA = new Y.Doc();
+    const docB = new Y.Doc();
+    const a = createYDocStore(docA);
+    const b = createYDocStore(docB);
+    a.transact((tx) => tx.add(rect("r")));
+    Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+    // Offline at the same time: each reacts, and one takes back a reaction it never gave.
+    a.transact((tx) => tx.react(id("r"), "like", "userAAAAAAAA", true));
+    b.transact((tx) => {
+      tx.react(id("r"), "like", "userBBBBBBBB", true);
+      tx.react(id("r"), "party", "userBBBBBBBB", true);
+      tx.react(id("r"), "like", "userAAAAAAAA", false);
+    });
+    Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
+    Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+    const expected = { like: ["userAAAAAAAA", "userBBBBBBBB"], party: ["userBBBBBBBB"] };
+    expect(a.get(id("r"))?.reactions).toEqual(expected);
+    expect(b.get(id("r"))?.reactions).toEqual(expected);
+
+    a.transact((tx) => tx.react(id("r"), "like", "userAAAAAAAA", false));
+    expect(a.get(id("r"))?.reactions).toEqual({
+      like: ["userBBBBBBBB"],
+      party: ["userBBBBBBBB"],
+    });
+  });
+
+  it("ignores reactions that aren't on the list or have bad ids, and copies start without any", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    store.transact((tx) => {
+      tx.add(rect("r"));
+      tx.react(id("r"), "like", "short", true);
+      tx.react(id("r"), "nope" as "like", "userAAAAAAAA", true);
+    });
+    const map = doc.getMap<Y.Map<unknown>>("shapes").get("r");
+    map?.set("reaction.like.has spaces!", true);
+    map?.set("reaction.boo.userAAAAAAAA", true);
+    expect(store.get(id("r"))?.reactions).toBeUndefined();
+    store.transact((tx) => tx.react(id("r"), "wow", "userAAAAAAAA", true));
+    const reacted = store.get(id("r")) as Shape;
+    store.transact((tx) => tx.add({ ...reacted, id: id("copy") }));
+    expect(store.get(id("copy"))?.reactions).toBeUndefined();
+  });
+
+  it("stores an image's file id, and only a well-formed one", () => {
+    const store = createYDocStore(new Y.Doc());
+    const asset = "a".repeat(64);
+    store.transact((tx) => {
+      tx.add(rect("i", { type: "image", asset }));
+      tx.add(rect("bad", { type: "image", asset: "../etc/passwd" }));
+      tx.add(rect("r", { asset }));
+    });
+    expect(store.get(id("i"))?.asset).toBe(asset);
+    expect(store.get(id("bad"))?.asset).toBe("");
+    expect(store.get(id("r"))?.asset).toBeUndefined();
   });
 });

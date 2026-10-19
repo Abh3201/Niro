@@ -359,6 +359,8 @@ describe("limits", () => {
       connections: 2_000,
       messagesPerSecond: 200,
       bytesPerSecond: 1024 * 1024,
+      imageBytes: 5 * 1024 * 1024,
+      boardImageBytes: 50 * 1024 * 1024,
     });
   });
 });

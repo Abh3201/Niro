@@ -5,6 +5,10 @@
 	handle /ws {
 		reverse_proxy realtime:8787
 	}
+	# ...and so do images on boards...
+	handle /assets/* {
+		reverse_proxy realtime:8787
+	}
 	# ...and everything else to the web app. /healthz and /metrics stay
 	# inside the compose network.
 	handle {

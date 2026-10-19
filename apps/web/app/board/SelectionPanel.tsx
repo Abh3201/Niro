@@ -1,5 +1,5 @@
-import { COLORS, type ColorName } from "@niro/doc";
-import { DARK_PALETTE, type Engine, LIGHT_PALETTE } from "@niro/engine";
+import { COLORS, type ColorName, REACTION_NAMES, REACTIONS } from "@niro/doc";
+import { DARK_PALETTE, type Engine, LIGHT_PALETTE, type ReactionSummary } from "@niro/engine";
 import {
   BringForwardIcon,
   BringToFrontIcon,
@@ -14,6 +14,7 @@ import { useEngineState } from "./useEngineState";
 import { usePrefersDark } from "./usePrefersDark";
 
 const NO_SELECTION: readonly string[] = [];
+const NO_REACTIONS: readonly ReactionSummary[] = [];
 
 /**
  * Color, order, grouping, duplicate and delete for the selected shapes.
@@ -25,6 +26,7 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
   const canGroup = useEngineState(engine, (s) => s.canGroup, false);
   const canUngroup = useEngineState(engine, (s) => s.canUngroup, false);
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
+  const reactions = useEngineState(engine, (s) => s.selectionReactions, NO_REACTIONS);
   // Swatches show each color the way the board draws it in this theme.
   const palette = usePrefersDark() ? DARK_PALETTE : LIGHT_PALETTE;
   if (selection.length === 0 || readOnly) return null;
@@ -105,6 +107,28 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
           <UngroupIcon />
         </button>
       )}
+      <span className="divider" />
+      <fieldset className="reactions">
+        <legend className="visually-hidden">Reactions</legend>
+        {REACTION_NAMES.map((name) => {
+          const summary = reactions.find((r) => r.reaction === name);
+          return (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={summary?.mine ?? false}
+              aria-label={`React ${name}${summary ? `, ${summary.count}` : ""}`}
+              title={`React ${name}`}
+              data-testid={`react-${name}`}
+              className="reaction"
+              onClick={() => engine.toggleReaction(name)}
+            >
+              <span aria-hidden="true">{REACTIONS[name]}</span>
+              {summary && <span className="reaction-count">{summary.count}</span>}
+            </button>
+          );
+        })}
+      </fieldset>
       <span className="divider" />
       <button
         type="button"

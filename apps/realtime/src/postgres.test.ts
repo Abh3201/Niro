@@ -49,10 +49,26 @@ describe.skipIf(!databaseUrl)("PostgresStorage", () => {
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);
   });
 
+  it("keeps images per board, once each, up to the board's total", async () => {
+    const storage = await open();
+    const image = (byte: number, size: number) => ({
+      type: "image/png" as const,
+      data: new Uint8Array(size).fill(byte),
+    });
+    expect(await storage.put(BOARD, "a", image(1, 600), 1000)).toBe("stored");
+    expect(await storage.put(BOARD, "a", image(1, 600), 1000)).toBe("exists");
+    expect(await storage.put(BOARD, "b", image(2, 500), 1000)).toBe("full");
+    expect(await storage.put("board-other1", "b", image(2, 500), 1000)).toBe("stored");
+    const got = await storage.get(BOARD, "a");
+    expect(got?.type).toBe("image/png");
+    expect(new Uint8Array(got?.data ?? [])).toEqual(image(1, 600).data);
+    expect(await storage.get(BOARD, "b")).toBeNull();
+  });
+
   it("creates the schema once, even when servers start together", async () => {
     await Promise.all([open(), open(), open()]);
     const rows = await query<{ version: number }>(`SELECT version FROM ${schema}.niro_migrations`);
-    expect(rows).toEqual([{ version: 1 }]);
+    expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
   });
 
   it("refuses a database a newer Niro has migrated", async () => {

@@ -1,10 +1,11 @@
 import type { Engine, ToolName } from "@niro/engine";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import {
   ArrowIcon,
   EllipseIcon,
   FrameIcon,
   HandIcon,
+  ImageIcon,
   LineIcon,
   PenIcon,
   RectangleIcon,
@@ -29,8 +30,9 @@ const TOOLS: ReadonlyArray<{ tool: ToolName; label: string; key: string; icon: R
   { tool: "frame", label: "Frame", key: "F", icon: <FrameIcon /> },
 ];
 
-/** Tool picker, plus undo and redo underneath. */
-export function Toolbar({ engine }: { engine: Engine }) {
+/** Tool picker and the image button, plus undo and redo underneath. */
+export function Toolbar({ engine, onImage }: { engine: Engine; onImage(file: File): void }) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const active = useEngineState(engine, (s) => s.tool, "select");
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
   const canUndo = useEngineState(engine, (s) => s.canUndo, false);
@@ -53,6 +55,31 @@ export function Toolbar({ engine }: { engine: Engine }) {
               {icon}
             </button>
           ),
+        )}
+        {!readOnly && (
+          <>
+            <button
+              type="button"
+              aria-label="Image"
+              title="Image (or paste, or drop a file on the board)"
+              data-testid="add-image"
+              onClick={() => fileInput.current?.click()}
+            >
+              <ImageIcon />
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              hidden
+              data-testid="image-file"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) onImage(file);
+              }}
+            />
+          </>
         )}
       </div>
       <div className="panel tools" role="toolbar" aria-label="History" aria-orientation="vertical">

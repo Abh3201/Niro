@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo, Socket as NetSocket } from "node:net";
 import { countShapes } from "@niro/doc/yjs";
 import {
@@ -18,6 +18,7 @@ import {
 import { verifyToken } from "@niro/sync/auth";
 import { type WebSocket, WebSocketServer } from "ws";
 import type * as Y from "yjs";
+import { type AssetStorage, assetId, IMAGE_TYPES, MemoryAssets, sniffImageType } from "./assets";
 import { CONTENT_TYPE, Counter, Histogram, Registry, Sampled } from "./metrics";
 import { TokenBucket } from "./rate";
 
@@ -63,6 +64,10 @@ export interface Limits {
   messagesPerSecond: number;
   /** Bytes a connection may send per second, sustained. Bursts of four times that pass. */
   bytesPerSecond: number;
+  /** Largest image file. Browsers shrink big pictures before uploading, so few come near it. */
+  imageBytes: number;
+  /** All of one board's image files together. */
+  boardImageBytes: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -75,6 +80,8 @@ export const DEFAULT_LIMITS: Limits = {
   connections: 2_000,
   messagesPerSecond: 200,
   bytesPerSecond: 1024 * 1024,
+  imageBytes: 5 * 1024 * 1024,
+  boardImageBytes: 50 * 1024 * 1024,
 };
 
 export interface RealtimeServerOptions {
@@ -82,6 +89,8 @@ export interface RealtimeServerOptions {
   secret: string;
   /** Where boards are kept between sessions. Default: in memory, lost on restart. */
   storage?: BoardStorage;
+  /** Where images are kept. Default: in memory, lost on restart. */
+  assets?: AssetStorage;
   limits?: Partial<Limits>;
   /** When set, `/metrics` needs `Authorization: Bearer <token>`. */
   metricsToken?: string;
@@ -167,6 +176,13 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
         [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
       ),
     ),
+    images: registry.add(
+      new Counter(
+        "niro_image_uploads_total",
+        "Image uploads, by outcome.",
+        ["stored", "exists", "full", "refused"].map((outcome) => ({ outcome })),
+      ),
+    ),
     documentBytes: registry.add(
       new Histogram(
         "niro_document_bytes",
@@ -246,8 +262,21 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     ),
   );
 
+  const assets = options.assets ?? new MemoryAssets();
+  const assetRoutes = assetHandler(assets, options.secret, limits, (outcome) =>
+    metrics.images.inc({ outcome }),
+  );
+
   const http = createServer((req, res) => {
     const path = pathname(req);
+    if (path?.startsWith("/assets/")) {
+      assetRoutes(req, res, path).catch((error: unknown) => {
+        log("image request failed", error);
+        if (!res.headersSent) res.writeHead(500, CORS);
+        res.end();
+      });
+      return;
+    }
     if (req.method === "GET" && path === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
@@ -474,6 +503,123 @@ function acquireWithin(host: RoomHost, boardId: string, ms: number): Promise<Lea
         reject(error);
       },
     );
+  });
+}
+
+/**
+ * Any page may call the image routes: they take a token in a header, never
+ * a cookie, so another site gets nothing a link didn't already give it.
+ */
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-max-age": "86400",
+} as const;
+
+const ASSET_PATH = /^\/assets\/([A-Za-z0-9_-]+)(?:\/([0-9a-f]{64}))?$/;
+
+/**
+ * `POST /assets/<board>` with an image as the body stores it and answers
+ * `{id}`; `GET /assets/<board>/<id>` returns it. Both take the board's
+ * 60-second token as `Authorization: Bearer <token>`: posting needs an edit
+ * token, reading any token for that board.
+ */
+function assetHandler(
+  assets: AssetStorage,
+  secret: string,
+  limits: Limits,
+  counted: (outcome: "stored" | "exists" | "full" | "refused") => void,
+) {
+  const answer = (res: ServerResponse, status: number, body?: unknown) => {
+    res.writeHead(status, {
+      ...CORS,
+      "cache-control": "no-store",
+      ...(body !== undefined && { "content-type": "application/json" }),
+    });
+    res.end(body === undefined ? undefined : JSON.stringify(body));
+  };
+  return async (req: IncomingMessage, res: ServerResponse, path: string) => {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS).end();
+      return;
+    }
+    const match = ASSET_PATH.exec(path);
+    const boardId = match?.[1] ?? "";
+    const id = match?.[2];
+    if (!match || !BOARD_ID.test(boardId)) return answer(res, 404);
+    const header = req.headers.authorization ?? "";
+    const grant = header.startsWith("Bearer ") ? verifyToken(secret, header.slice(7)) : null;
+    if (!grant || grant.boardId !== boardId) return answer(res, 401, { error: "unauthorized" });
+
+    if (req.method === "GET" && id) {
+      const asset = await assets.get(boardId, id);
+      if (!asset) return answer(res, 404);
+      res.writeHead(200, {
+        ...CORS,
+        "content-type": asset.type,
+        "content-length": asset.data.byteLength,
+        // The id is the content's hash, so it never changes.
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; sandbox",
+      });
+      res.end(asset.data);
+      return;
+    }
+    if (req.method !== "POST" || id) return answer(res, 405);
+    if (grant.role !== "edit") return answer(res, 403, { error: "view only" });
+    const declared = (req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "";
+    if (!Object.hasOwn(IMAGE_TYPES, declared)) {
+      counted("refused");
+      return answer(res, 415, { error: "unsupported type" });
+    }
+    const length = Number(req.headers["content-length"]);
+    if (Number.isFinite(length) && length > limits.imageBytes) {
+      counted("refused");
+      req.resume();
+      return answer(res, 413, { error: "too big" });
+    }
+    const data = await readBody(req, limits.imageBytes);
+    if (!data) {
+      counted("refused");
+      return answer(res, 413, { error: "too big" });
+    }
+    const type = sniffImageType(data);
+    if (type === null || type !== declared) {
+      counted("refused");
+      return answer(res, 415, { error: "not an image of that type" });
+    }
+    const assetKey = assetId(data);
+    const result = await assets.put(boardId, assetKey, { type, data }, limits.boardImageBytes);
+    counted(result);
+    if (result === "full") return answer(res, 413, { error: "board full" });
+    return answer(res, result === "stored" ? 201 : 200, { id: assetKey });
+  };
+}
+
+/** The request's body, or null once it passes `max` bytes (the rest is left unread). */
+function readBody(req: IncomingMessage, max: number): Promise<Uint8Array | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const onData = (chunk: Buffer) => {
+      size += chunk.byteLength;
+      if (size > max) {
+        req.off("data", onData);
+        req.resume();
+        resolve(null);
+        return;
+      }
+      chunks.push(chunk);
+    };
+    req.on("data", onData);
+    req.on("end", () => {
+      if (size <= max) resolve(Buffer.concat(chunks));
+    });
+    // A client that gives up mid-upload: nothing more is coming. (Resolving twice is harmless.)
+    req.on("close", () => resolve(null));
+    req.on("error", reject);
   });
 }
 

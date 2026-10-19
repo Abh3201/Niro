@@ -12,15 +12,20 @@ import { IndexeddbPersistence } from "y-indexeddb";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { readKeys, rememberKey, roleOf } from "./access";
+import { type Assets, createAssets } from "./assets";
 import { loadIdentity, Presence } from "./presence";
 
 /** How long to wait for IndexedDB before showing the board without saved content. */
 const LOAD_TIMEOUT_MS = 3000;
 /** How long a browser with nothing saved waits for the server's copy before showing the board. */
 const SYNC_TIMEOUT_MS = 3000;
+/** Reuse a token this long; it lasts 60 s, and an image request may be slow to start. */
+const TOKEN_REUSE_MS = 40_000;
 
 export interface OpenBoard {
   readonly store: YDocStore;
+  /** The board's images: uploading and loading them. */
+  readonly assets: Assets;
   readonly presence: Presence;
   /** The key the board was opened with. */
   readonly key: string | null;
@@ -92,7 +97,7 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
   let viewKey = key && roleOf(key) === "edit" ? (readKeys(boardId).view ?? null) : null;
   const viewKeyListeners = new Set<() => void>();
 
-  const connect = async (): Promise<Socket> => {
+  const requestGrant = async (): Promise<TokenResponse> => {
     if (!key) throw new AccessDenied();
     const response = await fetch("/api/token", {
       method: "POST",
@@ -107,6 +112,23 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
       rememberKey(boardId, viewKey);
       for (const listener of viewKeyListeners) listener();
     }
+    return grant;
+  };
+
+  // Image requests share one token until it's close to running out.
+  let reusable: { token: Promise<string>; until: number } | null = null;
+  const imageToken = (): Promise<string> => {
+    if (reusable && Date.now() < reusable.until) return reusable.token;
+    const token = requestGrant().then((grant) => grant.token);
+    reusable = { token, until: Date.now() + TOKEN_REUSE_MS };
+    token.catch(() => {
+      reusable = null;
+    });
+    return token;
+  };
+
+  const connect = async (): Promise<Socket> => {
+    const grant = await requestGrant();
     const query = new URLSearchParams({
       v: String(PROTOCOL_VERSION),
       board: boardId,
@@ -137,6 +159,7 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
 
   return {
     store,
+    assets: createAssets({ boardId, realtimeUrl, token: imageToken }),
     presence,
     key,
     role,
