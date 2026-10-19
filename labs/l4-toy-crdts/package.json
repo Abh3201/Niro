@@ -1,0 +1,13 @@
+{
+  "name": "@niro/lab-l4-toy-crdts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lab L4: CRDTs by hand. A last-writer-wins map on Lamport clocks, and RGA for text, property-tested.",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "yjs": "^13.6.33"
+  }
+}
