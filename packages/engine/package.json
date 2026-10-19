@@ -1,0 +1,13 @@
+{
+  "name": "@niro/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Framework-free canvas engine: camera, input, tools, hit testing and rendering.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

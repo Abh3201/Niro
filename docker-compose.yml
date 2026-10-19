@@ -1,0 +1,45 @@
+# Self-host Niro: `docker compose up --build`, then open http://localhost:3000
+name: niro
+
+services:
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      realtime:
+        condition: service_healthy
+
+  realtime:
+    build:
+      context: .
+      target: realtime
+    environment:
+      # Not used until persistence lands in P3b; wired now so the services stay stable.
+      DATABASE_URL: postgres://niro:${POSTGRES_PASSWORD:-niro}@postgres:5432/niro
+    ports:
+      - "${REALTIME_PORT:-8787}:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: niro
+      POSTGRES_DB: niro
+      # Change this for any deployment that isn't on your own machine.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-niro}
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/<major>/, so mount the parent.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U niro -d niro"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -1,0 +1,13 @@
+{
+  "name": "@niro/doc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Board document model: shape types, the DocStore interface, schema and migrations.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}
