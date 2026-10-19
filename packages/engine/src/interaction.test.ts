@@ -135,6 +135,29 @@ describe("Interaction", () => {
     expect([...t.doc.all()][0]).toMatchObject({ x: 100, y: 30 });
   });
 
+  it("holds one undo step open for a whole gesture, and ends it on release or cancel", () => {
+    const t = setup();
+    let open = 0;
+    t.doc.holdStep = () => {
+      open++;
+      return () => {
+        open--;
+      };
+    };
+    t.setTool("rectangle");
+    t.interaction.pointerDown(t.pointer({ x: 0, y: 0 }));
+    t.interaction.pointerMove(t.pointer({ x: 100, y: 100 }));
+    expect(open).toBe(1);
+    t.interaction.pointerUp(t.pointer({ x: 100, y: 100 }));
+    expect(open).toBe(0);
+
+    t.interaction.pointerDown(t.pointer({ x: 50, y: 50 }));
+    t.interaction.pointerMove(t.pointer({ x: 80, y: 80 }));
+    expect(open).toBe(1);
+    t.interaction.cancel();
+    expect(open).toBe(0);
+  });
+
   it("selects with a marquee and clears on an empty click", () => {
     const t = setup();
     t.setTool("rectangle");

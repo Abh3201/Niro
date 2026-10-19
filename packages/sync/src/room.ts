@@ -28,6 +28,16 @@ export interface Peer {
 /** Largest awareness state accepted, as JSON characters. A cursor and a selection fit easily. */
 const MAX_AWARENESS_STATE = 16 * 1024;
 
+/**
+ * Most bytes of updates the room holds while they wait for something they
+ * depend on. Held updates fire no "update" event, so nothing else counts
+ * them against the board's size limit; without this cap, a client could
+ * grow the server's memory without end by sending edits built on edits
+ * that never arrive. Real catch-ups carry their dependencies and hold
+ * little or nothing.
+ */
+export const MAX_PENDING_BYTES = 2 * 1024 * 1024;
+
 interface Member {
   readonly role: Role;
   /** The awareness client id this connection speaks for, once it has said. */
@@ -145,6 +155,17 @@ export class Room {
     const waiting = this.doc.store.pendingStructs !== null || this.doc.store.pendingDs !== null;
     Y.applyUpdate(this.doc, update, waiting ? null : peer);
     this.stats.updatesApplied++;
+    if (this.pendingBytes() > MAX_PENDING_BYTES) {
+      // Nobody else has seen held updates, so dropping them keeps every copy equal.
+      this.doc.store.pendingStructs = null;
+      this.doc.store.pendingDs = null;
+      throw new Error("too many updates waiting for missing ones");
+    }
+  }
+
+  private pendingBytes(): number {
+    const { pendingStructs, pendingDs } = this.doc.store;
+    return (pendingStructs?.update.length ?? 0) + (pendingDs?.length ?? 0);
   }
 
   /**

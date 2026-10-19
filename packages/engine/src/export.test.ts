@@ -90,6 +90,12 @@ describe("exportSvg", () => {
     expect(svg).toMatch(/d="M[^"]*Q/);
   });
 
+  it("drops characters XML forbids, so the file always opens", () => {
+    const text = "a\u0001b\uD800c\uDC00d\uFFFEe 😀";
+    const svg = exportSvg(input([shape("label", { type: "text", w: 300, h: 30, text })])) as string;
+    expect(svg).toContain(">abcde 😀</text>");
+  });
+
   it("frames the shapes with a margin", () => {
     const svg = exportSvg(input([shape("a", { x: 10, y: 20, w: 100, h: 50 })])) as string;
     // A rectangle has a 1-unit edge allowance, then 32 units of margin.

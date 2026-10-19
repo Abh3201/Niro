@@ -54,6 +54,7 @@ export function memoryDoc(initial: readonly Shape[] = []): DocStore {
       return () => listeners.delete(listener);
     },
     checkpoint() {},
+    holdStep: () => () => {},
     undo() {},
     redo() {},
     canUndo: () => false,

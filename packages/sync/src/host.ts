@@ -140,6 +140,21 @@ export class RoomHost {
     return totals;
   }
 
+  /** True while the board is open or loading. */
+  isOpen(boardId: string): boolean {
+    return this.entries.has(boardId);
+  }
+
+  /**
+   * Roughly how big the open boards are together, as stored: never less
+   * than they are. A board still loading counts as nothing yet.
+   */
+  get openBytes(): number {
+    let bytes = 0;
+    for (const entry of this.entries.values()) if (entry.room) bytes += entry.bytes;
+    return bytes;
+  }
+
   /** Changes waiting to be written, across all rooms. */
   get unwritten(): number {
     let count = 0;

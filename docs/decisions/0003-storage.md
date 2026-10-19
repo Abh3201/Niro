@@ -10,7 +10,8 @@
 - **Tables:** `boards (id, snapshot, created_at, updated_at)` and `board_updates (board_id, seq, data)`. Appending inserts a row; compaction replaces the snapshot and deletes the rows in one transaction; loading reads both in one statement, so it never sees half a compaction. Migrations are numbered SQL run under an advisory lock, so servers starting together don't race.
 - **Writes are batched:** 2 s after the last change, at most 10 s after the first unwritten one. Every 100 writes, the rows are compacted into the snapshot. A failed write is kept and retried every 5 s.
 - **Losing the server loses at most one batch, and not even that while a browser has the board.** Browsers keep boards in IndexedDB and send the server whatever it lacks when they reconnect.
-- **Limits turn the board read-only for everyone** (10,000 shapes, about 20 MB). Refusing single CRDT updates would leave copies that never agree again; refusing everything after the line keeps them equal. The browser shows why.
+- **Limits turn the board read-only for everyone** (10,000 shapes, about 5 MB; it was 20 MB until measuring showed a board takes about 25 times its stored size in memory). Refusing single CRDT updates would leave copies that never agree again; refusing everything after the line keeps them equal. The browser shows why.
+- **The server has a memory budget for open boards** (`NIRO_MAX_OPEN_MB`, 40 MB stored, about 1 GB in memory) and a cap on connections (2,000). Boards cost nothing to create, so per-board limits alone don't bound the server. Past the budget, boards nobody has open are refused until some close; open boards keep working, because turning people out of a board they're using is worse than making a newcomer wait.
 - **`MemoryStorage` without `DATABASE_URL`,** for development and tests. In production the server refuses to start without a database.
 
 ## What this gives up

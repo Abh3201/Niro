@@ -129,13 +129,23 @@ export function sharedColor(scene: Scene, ids: Iterable<ShapeId>): ColorName | n
  * The frame a shape belongs in where it is now, other than those in
  * `exclude`: the one under its center, or for a line or arrow, the one
  * both its ends are in (an arrow from inside a frame to outside it isn't
- * cut off at the frame's edge).
+ * cut off at the frame's edge), or for a frame, the topmost under its
+ * center that contains it entirely.
  */
 export function frameFor(
   scene: Scene,
   shape: Shape,
   exclude: ReadonlySet<ShapeId> = new Set(),
 ): ShapeId | null {
+  if (shape.type === "frame") {
+    // A frame goes only into a frame that holds all of it: one drawn
+    // around a smaller frame takes that frame in (`adoptInto`) instead of
+    // landing inside it and being cut off by it.
+    const box = shapeBounds(shape);
+    return scene.frameAt(shapeCenter(shape), exclude, (frame) =>
+      boxContainsBox(shapeBounds(frame), box),
+    );
+  }
   if (!isLinear(shape.type)) return scene.frameAt(shapeCenter(shape), exclude);
   const [a, b] = lineEnds(shape);
   const frame = scene.frameAt(a, exclude);

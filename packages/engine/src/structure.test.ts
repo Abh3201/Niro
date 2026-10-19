@@ -273,6 +273,16 @@ describe("frames", () => {
     expect(inner.index < "a0").toBe(true);
   });
 
+  it("never puts a frame in a frame smaller than it, drawn or dragged", () => {
+    const { scene } = board(shapes());
+    // Drawn around f: it stays at the top level (and adoptInto takes f in).
+    expect(placeNew(scene, frame("big", -50, -50, 300, 300)).parentId).toBeNull();
+    // Dragged so its center lands on f, but bigger than f.
+    const wide = frame("wide", 400, 0, 600, 100, { index: "a2" });
+    const { scene: withWide } = board([...shapes(), wide]);
+    expect(reparentOnMove(withWide, [wide], new Set([id("wide")]), -600, 0).size).toBe(0);
+  });
+
   it("takes in shapes a new frame is drawn around, and lets go of those left outside", () => {
     const { scene, edit } = board([
       box("a", 10, 10, 20, 20, { index: "a0" }),

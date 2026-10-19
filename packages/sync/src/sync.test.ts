@@ -7,7 +7,7 @@ import * as Y from "yjs";
 import { AccessDenied, SyncClient } from "./client";
 import { runScenario } from "./fuzz";
 import { MessageType, ReadOnlyReason, syncUpdate } from "./protocol";
-import { type Peer, type Role, Room } from "./room";
+import { MAX_PENDING_BYTES, type Peer, type Role, Room } from "./room";
 import type { Socket } from "./socket";
 import { contentOf, presentIn, World } from "./testing";
 
@@ -249,6 +249,36 @@ describe("Room", () => {
     Y.applyUpdate(copy, first);
     applySent(copy, b.sent);
     expect(copy.getText("t").toString()).toBe("ab");
+    room.destroy();
+  });
+});
+
+describe("Room limits", () => {
+  it("closes a connection whose updates pile up waiting for ones that never arrive", () => {
+    const { room, peers } = roomWithPeers("edit", "edit");
+    const [a, b] = peers;
+    // Each update is built on an edit the room never gets, so it's held.
+    const held = (i: number) => {
+      const author = new Y.Doc();
+      author.clientID = 1000 + i;
+      const map = author.getMap("m");
+      map.set("first", 1);
+      const before = Y.encodeStateVector(author);
+      map.set("big", "x".repeat(256 * 1024));
+      return syncUpdate(Y.encodeStateAsUpdate(author, before));
+    };
+    let i = 0;
+    while (a.closed === null && i < 64) room.receive(a, held(i++));
+    expect(i * 256 * 1024).toBeGreaterThanOrEqual(MAX_PENDING_BYTES);
+    expect(i).toBeLessThan(64);
+    expect(a.closed).toBe(1007);
+    expect(room.doc.store.pendingStructs).toBeNull();
+    // The others carry on.
+    const doc = new Y.Doc();
+    doc.getMap("m").set("x", 1);
+    room.receive(b, syncUpdate(Y.encodeStateAsUpdate(doc)));
+    expect(room.doc.getMap("m").get("x")).toBe(1);
+    expect(b.closed).toBeNull();
     room.destroy();
   });
 });

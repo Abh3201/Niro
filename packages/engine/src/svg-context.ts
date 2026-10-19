@@ -279,12 +279,17 @@ function n(value: number): string {
   return String(Math.round(value * 1000) / 1000);
 }
 
-/** `text` for an XML attribute or element: markup escaped, and control characters XML forbids dropped. */
+/** `text` for an XML attribute or element: markup escaped, and characters XML forbids dropped. */
 function xml(text: string): string {
   return (
     text
       // biome-ignore lint/suspicious/noControlCharactersInRegex: removing them is the point.
       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+      // Half a surrogate pair, U+FFFE and U+FFFF are also not XML characters.
+      .replace(
+        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uFFFE\uFFFF]/g,
+        "",
+      )
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")

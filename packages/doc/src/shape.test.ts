@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAngle, readShape } from "./shape";
+import { MAX_COORDINATE, normalizeAngle, readShape } from "./shape";
 
 const valid = {
   type: "rectangle",
@@ -61,6 +61,15 @@ describe("readShape", () => {
     expect(readShape("s1", { ...valid, type: "text", text: "label" })?.text).toBe("label");
     expect(readShape("s1", { ...valid, text: 42 })?.text).toBe("");
     expect(readShape("l1", { ...valid, type: "line", text: "x" })?.text).toBe("");
+  });
+
+  it("keeps positions and sizes within reach of double precision", () => {
+    expect(readShape("s1", { ...valid, x: 1e20, y: -1e300, w: 1e15 })).toMatchObject({
+      x: MAX_COORDINATE,
+      y: -MAX_COORDINATE,
+      w: MAX_COORDINATE,
+    });
+    expect(readShape("l1", { ...valid, type: "line", h: -1e20 })?.h).toBe(-MAX_COORDINATE);
   });
 
   it("keeps negative width and height on lines, which point either way", () => {

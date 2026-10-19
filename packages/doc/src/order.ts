@@ -24,8 +24,13 @@ export function compareOrder(a: Ordered, b: Ordered): number {
   return 0;
 }
 
+/** The library's base-62 digits. It checks only a key's head, length and tail. */
+const BASE62_KEY = /^[0-9A-Za-z]+$/;
+
 export function isValidIndex(key: string): boolean {
-  if (key.length === 0 || key.length > 256) return false;
+  // A key with other characters passes the library's check, then makes it
+  // generate keys outside the bounds it was given ("a0~" and "a1" give "a0V").
+  if (key.length === 0 || key.length > 256 || !BASE62_KEY.test(key)) return false;
   try {
     generateKeyBetween(key, null);
     return true;
