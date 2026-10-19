@@ -68,6 +68,16 @@ export function boxesIntersect(a: Box, b: Box): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
 
+/** True when `inner` lies entirely inside `outer`, edges included. */
+export function boxContainsBox(outer: Box, inner: Box): boolean {
+  return (
+    inner.minX >= outer.minX &&
+    inner.maxX <= outer.maxX &&
+    inner.minY >= outer.minY &&
+    inner.maxY <= outer.maxY
+  );
+}
+
 export function boxContainsPoint(box: Box, p: Point): boolean {
   return p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY;
 }

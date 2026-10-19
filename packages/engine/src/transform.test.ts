@@ -53,7 +53,7 @@ describe("resizeBox", () => {
   it("leaves the shape unchanged when a handle is dropped where it started", () => {
     fc.assert(
       fc.property(boxes, fc.constantFrom(...HANDLES), (shape, handle) => {
-        const at = handleWorldPoint({ kind: "box", shape }, handle);
+        const at = handleWorldPoint({ kind: "box", shape, rotatable: true }, handle);
         const patch = resizeBox(shape, handle, at, false);
         close(patch.x as number, shape.x);
         close(patch.y as number, shape.y);
@@ -66,11 +66,13 @@ describe("resizeBox", () => {
   it("keeps the opposite handle fixed in world space, at any rotation", () => {
     fc.assert(
       fc.property(boxes, fc.constantFrom(...HANDLES), coord, coord, (shape, handle, px, py) => {
-        const anchor = handleWorldPoint({ kind: "box", shape }, opposite(handle));
+        const anchor = handleWorldPoint({ kind: "box", shape, rotatable: true }, opposite(handle));
         const resized = { ...shape, ...resizeBox(shape, handle, { x: px, y: py }, false) };
         // When the drag flips the box on one or both axes, the fixed point
         // becomes a different handle of the new box, so check them all.
-        const candidates = HANDLES.map((h) => handleWorldPoint({ kind: "box", shape: resized }, h));
+        const candidates = HANDLES.map((h) =>
+          handleWorldPoint({ kind: "box", shape: resized, rotatable: true }, h),
+        );
         const hit = candidates.some(
           (c) => Math.abs(c.x - anchor.x) < 1e-6 && Math.abs(c.y - anchor.y) < 1e-6,
         );

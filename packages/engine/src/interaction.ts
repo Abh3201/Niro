@@ -2,18 +2,18 @@ import {
   DEFAULT_COLOR,
   type DocStore,
   holdsText,
-  indexAbove,
   isLinear,
   newShapeId,
   type Shape,
   type ShapeId,
   type ShapePatch,
   type ShapeType,
+  type Tx,
 } from "@niro/doc";
 import { asDrawn, canAttachTo, detachUnless } from "./arrows";
 import type { Camera } from "./camera";
 import { type PenPoint, strokeShape } from "./freehand";
-import { type Box, boxFromPoints, distance, type Point } from "./geometry";
+import { type Box, boxContainsBox, boxFromPoints, distance, type Point } from "./geometry";
 import type { Scene } from "./scene";
 import {
   frameCenter,
@@ -24,6 +24,19 @@ import {
   type SelectionFrame,
   selectionFrame,
 } from "./selection";
+import { shapeBounds } from "./shapes";
+import {
+  adoptInto,
+  movers,
+  outermost,
+  placeNew,
+  releaseOutside,
+  reparentOnMove,
+  selectableUnit,
+  settleNew,
+  stepInto,
+  withDescendants,
+} from "./structure";
 import { DEFAULT_TEXT_WIDTH, TEXT_FONT_SIZE, textHeight, withHeight } from "./text";
 import {
   HANDLE_DIRECTIONS,
@@ -46,10 +59,11 @@ export type ToolName =
   | "line"
   | "arrow"
   | "text"
-  | "pen";
+  | "pen"
+  | "frame";
 
 /** The tools that drag out a shape of their own type. */
-type ShapeTool = "rectangle" | "ellipse" | "sticky" | "line" | "arrow";
+type ShapeTool = "rectangle" | "ellipse" | "sticky" | "line" | "arrow" | "frame";
 
 export interface ToolPointer {
   readonly pointerId: number;
@@ -72,6 +86,8 @@ export interface ToolPointer {
 export interface EditorHost {
   readonly doc: DocStore;
   readonly scene: Scene;
+  /** Edits the document in board coordinates (see `board-tx.ts`). */
+  transact(fn: (tx: Tx) => void): void;
   camera(): Camera;
   tool(): ToolName;
   setTool(tool: ToolName): void;
@@ -96,13 +112,16 @@ const HIT_TOLERANCE = 4;
 /** How far a pointer must travel before a press becomes a drag, in CSS pixels. */
 const DRAG_THRESHOLD = { mouse: 3, touch: 8 };
 
-const DEFAULT_SIZE: Record<"rectangle" | "ellipse" | "sticky" | "text", { w: number; h: number }> =
-  {
-    rectangle: { w: 160, h: 120 },
-    ellipse: { w: 140, h: 140 },
-    sticky: { w: 200, h: 200 },
-    text: { w: DEFAULT_TEXT_WIDTH, h: textHeight(1, TEXT_FONT_SIZE) },
-  };
+const DEFAULT_SIZE: Record<
+  "rectangle" | "ellipse" | "sticky" | "text" | "frame",
+  { w: number; h: number }
+> = {
+  rectangle: { w: 160, h: 120 },
+  ellipse: { w: 140, h: 140 },
+  sticky: { w: 200, h: 200 },
+  text: { w: DEFAULT_TEXT_WIDTH, h: textHeight(1, TEXT_FONT_SIZE) },
+  frame: { w: 640, h: 400 },
+};
 /** Narrowest text shape a drag with the text tool makes, in world units. */
 const MIN_TEXT_WIDTH = 40;
 const DEFAULT_LINE_LENGTH = 160;
@@ -117,7 +136,18 @@ type Gesture =
       /** Applied if the pointer comes up without dragging. */
       onClick?: () => void;
     }
-  | { kind: "move"; start: ToolPointer; before: Map<ShapeId, Shape> }
+  /**
+   * Moving the selection. `before` is what the move writes, as drawn when it
+   * started; `moving` is everything that goes along, including what's in
+   * frames; `units` are the selected shapes, which can change frames.
+   */
+  | {
+      kind: "move";
+      start: ToolPointer;
+      before: Map<ShapeId, Shape>;
+      moving: ReadonlySet<ShapeId>;
+      units: readonly Shape[];
+    }
   | { kind: "marquee"; start: ToolPointer; current: Point; base: readonly ShapeId[] }
   | {
       kind: "resize";
@@ -208,6 +238,15 @@ export class Interaction {
     return this.hoverCursor;
   }
 
+  /** What the selection's handles act on. */
+  frame(): SelectionFrame | null {
+    const { scene } = this.host;
+    const ids = this.host.selection();
+    const shapes = ids.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
+    const rotatable = !withDescendants(scene, ids).some((id) => scene.get(id)?.type === "frame");
+    return selectionFrame(shapes, rotatable);
+  }
+
   /** Returns false when the tool doesn't want this pointer (the input controller then pans). */
   pointerDown(p: ToolPointer): boolean {
     const tool = this.host.tool();
@@ -268,10 +307,14 @@ export class Interaction {
     // whatever gesture is still running.
     this.gesture = { kind: "idle" };
     if (g.kind === "pending") g.onClick?.();
+    if (g.kind === "resize") this.finishResize(g);
     if (g.kind === "create") this.finishCreate(g, p);
     if (g.kind === "text") this.finishText(g, p);
     if (g.kind === "draw") this.finishDraw(g);
     this.host.flushWrite();
+    // Handles are hidden during a drag: show them again, even if the last
+    // write was already drawn.
+    if (g.kind !== "pending") this.host.overlayChanged();
     this.hover(p);
   }
 
@@ -284,7 +327,7 @@ export class Interaction {
     if (g.kind === "line-end") this.restore(new Map([[g.before.id, g.before]]));
     if (g.kind === "create" && g.id !== null) {
       const id = g.id;
-      this.host.scheduleWrite(() => this.host.doc.transact((tx) => tx.remove(id)));
+      this.host.scheduleWrite(() => this.host.transact((tx) => tx.remove(id)));
     }
     if (g.kind === "marquee") this.host.setSelection(g.base);
     // A cancelled pen stroke was only ever in the overlay.
@@ -294,13 +337,21 @@ export class Interaction {
   }
 
   /**
-   * A double click: edits the text of the shape under the pointer, or starts
-   * a text shape on empty space.
+   * A double click: steps into the group under the pointer, edits the text
+   * of the shape there, or starts a text shape on empty space.
    */
   doubleClick(p: ToolPointer): void {
     const { host } = this;
-    if (host.tool() !== "select" || host.doc.readOnly || this.gesture.kind !== "idle") return;
+    if (host.tool() !== "select" || this.gesture.kind !== "idle") return;
     const hit = host.scene.hit(p.world, HIT_TOLERANCE / host.camera().zoom);
+    const unit = hit && selectableUnit(host.scene, hit.id, host.selection());
+    if (hit && unit !== hit.id) {
+      // Stepping into a group only changes the selection, so it works on a read-only board.
+      const inner = stepInto(host.scene, unit as ShapeId, hit.id);
+      if (inner) host.setSelection([inner]);
+      return;
+    }
+    if (host.doc.readOnly) return;
     if (!hit) host.startDraft(this.newShape(newShapeId(), "text", textAt(p.world)));
     else if (holdsText(hit.type)) host.startEditing(hit.id);
   }
@@ -318,8 +369,7 @@ export class Interaction {
         cursor = resizeCursor(handle.handle, frame?.kind === "box" ? frame.shape.rotation : 0);
       else if (handle?.kind === "rotate") cursor = "grab";
       else if (handle?.kind === "line-end") cursor = "crosshair";
-      else
-        hovered = this.host.scene.hit(p.world, HIT_TOLERANCE / this.host.camera().zoom)?.id ?? null;
+      else hovered = this.unitAt(p);
     }
     if (hovered !== this.hoveredId || cursor !== this.hoverCursor) {
       this.hoveredId = hovered;
@@ -328,12 +378,11 @@ export class Interaction {
     }
   }
 
-  private frame(): SelectionFrame | null {
-    const shapes = this.host
-      .selection()
-      .map((id) => this.host.scene.get(id))
-      .filter((s): s is Shape => s !== undefined);
-    return selectionFrame(shapes);
+  /** What a click at `p` would select: the shape there, or the group it's in. */
+  private unitAt(p: ToolPointer): ShapeId | null {
+    const { scene } = this.host;
+    const hit = scene.hit(p.world, HIT_TOLERANCE / this.host.camera().zoom);
+    return hit ? selectableUnit(scene, hit.id, this.host.selection()) : null;
   }
 
   private selectDown(p: ToolPointer): boolean {
@@ -344,7 +393,16 @@ export class Interaction {
     const handle = frame && !readOnly ? handleAt(frame, host.camera(), p.screen) : null;
     if (frame && handle) {
       host.doc.checkpoint();
-      const before = this.snapshot(host.selection());
+      // Resizing a frame leaves what's in it where it is (it's written too,
+      // since it's stored from the frame's corner, which may move); every
+      // other change carries the contents along.
+      const before =
+        frame.kind === "box"
+          ? this.snapshot([
+              frame.shape.id,
+              ...movers(host.scene, host.scene.childrenOf(frame.shape.id)),
+            ])
+          : this.snapshot(withDescendants(host.scene, host.selection()));
       if (handle.kind === "rotate")
         this.gesture = { kind: "rotate", start: p, pivot: frameCenter(frame), before };
       else if (handle.kind === "resize")
@@ -361,36 +419,41 @@ export class Interaction {
     }
 
     const selection = host.selection();
-    const hit = host.scene.hit(p.world, HIT_TOLERANCE / host.camera().zoom);
+    const hit = this.unitAt(p);
     const onDrag = readOnly ? "none" : "move";
     if (hit) {
-      const selected = selection.includes(hit.id);
+      const selected = selection.includes(hit);
       if (p.shiftKey) {
-        if (!selected) host.setSelection([...selection, hit.id]);
+        if (!selected) host.setSelection(outermost(host.scene, [...selection, hit]));
         this.gesture = {
           kind: "pending",
           start: p,
           onDrag,
           // Shift-click on a selected shape deselects it, unless it was dragged.
           ...(selected && {
-            onClick: () => host.setSelection(host.selection().filter((id) => id !== hit.id)),
+            onClick: () => host.setSelection(host.selection().filter((id) => id !== hit)),
           }),
         };
       } else {
-        if (!selected) host.setSelection([hit.id]);
+        if (!selected) host.setSelection([hit]);
         this.gesture = {
           kind: "pending",
           start: p,
           onDrag,
           // Clicking one shape of a multi-selection picks it alone, unless it was dragged.
-          ...(selected && selection.length > 1 && { onClick: () => host.setSelection([hit.id]) }),
+          ...(selected && selection.length > 1 && { onClick: () => host.setSelection([hit]) }),
         };
       }
       return true;
     }
 
-    // Empty space inside a multi-selection's frame drags the whole selection.
-    if (frame?.kind === "group" && insideFrame(frame, host.camera(), p.screen)) {
+    // Empty space inside the selection's frame drags the whole selection:
+    // between the shapes of several, or a group's, or inside a frame.
+    if (
+      frame &&
+      (frame.kind === "group" || (frame.kind === "box" && frame.shape.type === "frame")) &&
+      insideFrame(frame, host.camera(), p.screen)
+    ) {
       this.gesture = { kind: "pending", start: p, onDrag, onClick: () => host.setSelection([]) };
       return true;
     }
@@ -403,8 +466,17 @@ export class Interaction {
   }
 
   private beginMove(start: ToolPointer): void {
-    this.host.doc.checkpoint();
-    this.gesture = { kind: "move", start, before: this.snapshot(this.host.selection()) };
+    const { host } = this;
+    host.doc.checkpoint();
+    const units = outermost(host.scene, host.selection());
+    // Selected groups are in `before` so a cancelled move puts them back in their frames.
+    this.gesture = {
+      kind: "move",
+      start,
+      before: this.snapshot([...units, ...movers(host.scene, units)]),
+      moving: new Set(withDescendants(host.scene, units)),
+      units: [...this.snapshot(units).values()],
+    };
   }
 
   private drag(p: ToolPointer): void {
@@ -419,15 +491,30 @@ export class Interaction {
           if (Math.abs(dx) > Math.abs(dy)) dy = 0;
           else dx = 0;
         }
-        this.write(g.before, (shape) => translate(shape, dx, dy), true);
+        // Shapes dragged into or out of a frame join or leave it as they go.
+        this.write(
+          g.before,
+          (shape) => translate(shape, dx, dy),
+          g.moving,
+          () => reparentOnMove(host.scene, g.units, g.moving, dx, dy),
+        );
         break;
       }
       case "marquee": {
         g.current = p.world;
         const box = boxFromPoints([g.start.world, g.current]);
         const ids = new Set(g.base);
-        for (const shape of host.scene.inBox(box)) ids.add(shape.id);
-        host.setSelection([...ids]);
+        for (const shape of host.scene.inBox(box)) {
+          // Groups are found through what's in them.
+          if (shape.type === "group") continue;
+          const unit = selectableUnit(host.scene, shape.id, g.base);
+          const unitShape = host.scene.get(unit);
+          // A frame is selected only when the marquee takes it in whole, so
+          // one started inside a frame selects what's in it.
+          if (unitShape?.type === "frame" && !boxContainsBox(box, shapeBounds(unitShape))) continue;
+          ids.add(unit);
+        }
+        host.setSelection(outermost(host.scene, ids));
         host.overlayChanged();
         break;
       }
@@ -436,7 +523,11 @@ export class Interaction {
         if (frame.kind === "box") {
           const shape = g.before.get(frame.shape.id);
           if (shape)
-            this.write(g.before, () => resizeBox(shape, handle, p.world, p.shiftKey), true);
+            this.write(g.before, (s) =>
+              s.id === shape.id
+                ? resizeBox(shape, handle, p.world, p.shiftKey)
+                : { x: s.x, y: s.y },
+            );
         } else {
           // Several shapes scale uniformly from the opposite corner.
           const opposite = (Object.keys(HANDLE_DIRECTIONS) as Handle[]).find((h) => {
@@ -453,7 +544,7 @@ export class Interaction {
               ? 1
               : ((p.world.x - anchor.x) * diagonal.x + (p.world.y - anchor.y) * diagonal.y) /
                 lengthSq;
-          this.write(g.before, (shape) => scaleAround(shape, anchor, Math.max(0.01, s)), true);
+          this.write(g.before, (shape) => scaleAround(shape, anchor, Math.max(0.01, s)), g.before);
         }
         break;
       }
@@ -466,7 +557,7 @@ export class Interaction {
           const base = single && !isLinear(single.type) ? single.rotation : 0;
           delta = snapAngle(base + delta) - base;
         }
-        this.write(g.before, (shape) => rotateAroundPivot(shape, g.pivot, delta), true);
+        this.write(g.before, (shape) => rotateAroundPivot(shape, g.pivot, delta), g.before);
         break;
       }
       case "line-end": {
@@ -497,16 +588,28 @@ export class Interaction {
           const id = newShapeId();
           g.id = id;
           const shape = this.newShape(id, g.type, patch);
-          host.scheduleWrite(() => host.doc.transact((tx) => tx.add(shape)));
+          host.scheduleWrite(() => host.transact((tx) => tx.add(shape)));
           host.flushWrite();
           host.setSelection([id]);
         } else {
           const id = g.id;
-          host.scheduleWrite(() => host.doc.transact((tx) => tx.update(id, patch)));
+          host.scheduleWrite(() => host.transact((tx) => tx.update(id, patch)));
         }
         break;
       }
     }
+  }
+
+  /** A resized frame takes in the shapes now inside it and lets go of those outside. */
+  private finishResize(g: Extract<Gesture, { kind: "resize" }>): void {
+    const { host } = this;
+    if (g.frame.kind !== "box" || g.frame.shape.type !== "frame") return;
+    const id = g.frame.shape.id;
+    host.flushWrite();
+    host.transact((tx) => {
+      releaseOutside(host.scene, tx, id);
+      adoptInto(host.scene, tx, id);
+    });
   }
 
   private finishCreate(g: Extract<Gesture, { kind: "create" }>, p: ToolPointer): void {
@@ -516,9 +619,14 @@ export class Interaction {
       // A click without a drag drops a default-size shape centered on the pointer.
       id = newShapeId();
       const shape = this.newShape(id, g.type, defaultGeometry(g.type, p.world));
-      host.scheduleWrite(() => host.doc.transact((tx) => tx.add(shape)));
+      host.scheduleWrite(() => host.transact((tx) => tx.add(shape)));
     }
     host.flushWrite();
+    // Part of the same undo step as drawing it: where it ended up decides
+    // which frame it's in, and a new frame takes in what it was drawn around.
+    const created = id;
+    host.transact((tx) => settleNew(host.scene, tx, created));
+    if (g.type === "frame") host.transact((tx) => adoptInto(host.scene, tx, created));
     host.setSelection([id]);
     host.setTool("select");
     // Sticky notes are for writing on.
@@ -529,9 +637,8 @@ export class Interaction {
   private finishDraw(g: Extract<Gesture, { kind: "draw" }>): void {
     const { host } = this;
     if (g.points.length === 0) return;
-    const shape = this.newShape(newShapeId(), "freehand", {});
-    const stroke = { ...shape, ...strokeShape(g.points) };
-    host.scheduleWrite(() => host.doc.transact((tx) => tx.add(stroke)));
+    const stroke = this.newShape(newShapeId(), "freehand", strokeShape(g.points));
+    host.scheduleWrite(() => host.transact((tx) => tx.add(stroke)));
     host.overlayChanged();
   }
 
@@ -568,8 +675,9 @@ export class Interaction {
     host.startDraft(this.newShape(newShapeId(), "text", geometry));
   }
 
+  /** A new shape, on top, in the frame it's drawn in. */
   private newShape(id: ShapeId, type: ShapeType, geometry: ShapePatch): Shape {
-    return {
+    const shape: Shape = {
       id,
       type,
       x: 0,
@@ -578,7 +686,7 @@ export class Interaction {
       h: 1,
       rotation: 0,
       parentId: null,
-      index: indexAbove(this.host.scene.ordered()),
+      index: "a0",
       color: DEFAULT_COLOR[type],
       text: "",
       points: [],
@@ -586,6 +694,7 @@ export class Interaction {
       to: null,
       ...geometry,
     };
+    return { ...shape, ...placeNew(this.host.scene, shape) };
   }
 
   private snapshot(ids: readonly ShapeId[]): Map<ShapeId, Shape> {
@@ -599,36 +708,52 @@ export class Interaction {
 
   /**
    * Schedules one transaction applying `patch` to every shape in `before`,
-   * which are shapes as drawn. A text shape's height follows its text,
-   * whatever its new width. With `detach`, an arrow lets go of shapes that
-   * aren't moving with it.
+   * which are shapes as drawn, and then the patches `extra` returns when
+   * the write runs. A text shape's height follows its text, whatever its
+   * new width. With `along`, the shapes moving together, an arrow lets go
+   * of shapes that aren't. Groups are skipped: their boxes follow what's in
+   * them.
    */
   private write(
     before: Map<ShapeId, Shape>,
     patch: (shape: Shape) => ShapePatch,
-    detach = false,
+    along: { has(id: ShapeId): boolean } | null = null,
+    extra?: () => Map<ShapeId, ShapePatch>,
   ): void {
     const { host } = this;
-    host.scheduleWrite(() =>
-      host.doc.transact((tx) => {
+    host.scheduleWrite(() => {
+      const more = extra?.();
+      host.transact((tx) => {
         for (const shape of before.values()) {
+          if (shape.type === "group") continue;
           let change = { ...asDrawn(shape), ...patch(shape) };
           if (shape.type === "text") {
             const next = { ...shape, ...change };
             change = { ...change, ...withHeight(next, host.fittedHeight(next)) };
           }
-          if (detach) change = { ...change, ...detachUnless(shape, (id) => before.has(id)) };
+          if (along) change = { ...change, ...detachUnless(shape, (id) => along.has(id)) };
           tx.update(shape.id, change);
         }
-      }),
-    );
+        for (const [id, change] of more ?? []) tx.update(id, change);
+      });
+    });
   }
 
+  /** Puts every shape in `before` back as it was, including which frame or group it was in. */
   private restore(before: Map<ShapeId, Shape>): void {
-    this.write(before, (shape) => {
-      const { id: _id, type: _type, text: _text, points: _points, ...fields } = shape;
-      return fields;
-    });
+    const groups = new Map<ShapeId, ShapePatch>();
+    for (const shape of before.values())
+      if (shape.type === "group")
+        groups.set(shape.id, { parentId: shape.parentId, index: shape.index });
+    this.write(
+      before,
+      (shape) => {
+        const { id: _id, type: _type, text: _text, points: _points, ...fields } = shape;
+        return fields;
+      },
+      null,
+      () => groups,
+    );
   }
 }
 

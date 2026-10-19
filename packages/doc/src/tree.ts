@@ -1,3 +1,5 @@
+import { isContainer, type ShapeType } from "./shape";
+
 /**
  * Groups and frames form a tree through each shape's `parentId`. Yjs has no
  * move operation, so two peers can each make a valid move that, merged,
@@ -7,7 +9,8 @@
  * Instead of writing a fix back, which two peers could do differently at the
  * same time, every reader derives the same *effective* parent from the
  * stored data:
- * - a parent that doesn't exist makes the shape top level;
+ * - a parent that doesn't exist, or isn't a group or frame, makes the shape
+ *   top level;
  * - in a cycle, the member with the smallest id becomes top level.
  *
  * The parent graph has one outgoing edge per node, so each connected part has
@@ -17,6 +20,7 @@
 
 interface Parented {
   readonly id: string;
+  readonly type: ShapeType;
   readonly parentId: string | null;
 }
 
@@ -26,9 +30,9 @@ const DONE = 2;
 export function effectiveParents(shapes: Iterable<Parented>): Map<string, string | null> {
   const parent = new Map<string, string | null>();
   const all = [...shapes];
-  const ids = new Set(all.map((s) => s.id));
+  const containers = new Set(all.filter((s) => isContainer(s.type)).map((s) => s.id));
   for (const s of all) {
-    parent.set(s.id, s.parentId !== null && ids.has(s.parentId) ? s.parentId : null);
+    parent.set(s.id, s.parentId !== null && containers.has(s.parentId) ? s.parentId : null);
   }
 
   const state = new Map<string, number>();

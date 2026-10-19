@@ -1,9 +1,10 @@
-import type { DocStore, Shape, ShapeChange, ShapeId, ShapePatch, TextEdit } from "@niro/doc";
+import type { DocStore, Shape, ShapeChange, ShapeId, ShapePatch, TextEdit, Tx } from "@niro/doc";
 import type { Camera } from "./camera";
 import type { Palette } from "./render";
 import { shapeCenter } from "./shapes";
 import {
   FONT_FAMILY,
+  FRAME_LABEL_GAP,
   inkColor,
   LINE_HEIGHT,
   MAX_TEXT_LENGTH,
@@ -16,6 +17,10 @@ import { applyEdit, diffText, mapPosition, rebaseEdit } from "./text-diff";
 export interface TextEditorHost {
   readonly container: HTMLElement;
   readonly doc: DocStore;
+  /** A shape as drawn, on the board. */
+  shape(id: ShapeId): Shape | undefined;
+  /** Edits the document in board coordinates (see `board-tx.ts`). */
+  transact(fn: (tx: Tx) => void): void;
   readonly layouts: TextLayouts;
   camera(): Camera;
   palette(): Palette;
@@ -51,6 +56,8 @@ export class TextEditor {
   private composing = false;
   /** This editor's own write is going into the document. */
   private writing = false;
+  /** A frame's name: Enter finishes it instead of starting a new line. */
+  private name = false;
   private readonly cleanup: Array<() => void> = [];
 
   constructor(private readonly host: TextEditorHost) {}
@@ -70,7 +77,7 @@ export class TextEditor {
     if (doc.readOnly) return;
     const el = document.createElement("textarea");
     el.dataset.testid = "text-editor";
-    el.setAttribute("aria-label", "Text");
+    el.setAttribute("aria-label", shape.type === "frame" ? "Frame name" : "Text");
     el.maxLength = MAX_TEXT_LENGTH;
     el.value = shape.text;
     Object.assign(el.style, {
@@ -95,6 +102,7 @@ export class TextEditor {
     this.id = shape.id;
     this.draft = draft ? shape : null;
     this.base = shape.text;
+    this.name = shape.type === "frame";
 
     this.listen(el, "input", () => {
       if (!this.composing) this.flush();
@@ -146,7 +154,8 @@ export class TextEditor {
 
     const { doc } = this.host;
     const shape = wasDraft ? undefined : doc.get(id);
-    if (shape?.type === "text" && shape.text.trim() === "") doc.transact((tx) => tx.remove(id));
+    if (shape?.type === "text" && shape.text.trim() === "")
+      this.host.transact((tx) => tx.remove(id));
     doc.checkpoint();
     this.host.changed();
   }
@@ -158,7 +167,7 @@ export class TextEditor {
    */
   update(): void {
     if (!this.el || !this.id) return;
-    const shape = this.draft ?? this.host.doc.get(this.id);
+    const shape = this.draft ?? this.host.shape(this.id);
     if (!shape || this.host.doc.readOnly) {
       this.stop();
       return;
@@ -174,7 +183,8 @@ export class TextEditor {
   private keyDown(event: KeyboardEvent): void {
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
-    if (event.key === "Escape" || (mod && event.key === "Enter")) {
+    const enter = event.key === "Enter" && !event.isComposing;
+    if (event.key === "Escape" || (enter && (mod || (this.name && !event.shiftKey)))) {
       event.preventDefault();
       this.stop();
     } else if (mod && !event.altKey && (key === "z" || key === "y") && !event.isComposing) {
@@ -209,12 +219,12 @@ export class TextEditor {
       if (this.draft) {
         const shape = { ...this.draft, text: el.value };
         this.draft = null;
-        doc.transact((tx) => tx.add({ ...shape, ...this.fit(shape) }));
+        this.host.transact((tx) => tx.add({ ...shape, ...this.fit(shape) }));
         this.base = el.value;
         this.host.changed();
         return;
       }
-      const shape = doc.get(id);
+      const shape = this.host.shape(id);
       if (!shape) return;
       // Others' typing the textarea doesn't show yet (it arrived while an
       // input method was composing) moves this edit along.
@@ -222,7 +232,7 @@ export class TextEditor {
       const local = remote ? rebaseEdit(edit, remote) : edit;
       const fitted =
         shape.type === "text" ? this.fit({ ...shape, text: applyEdit(shape.text, local) }) : null;
-      doc.transact((tx) => {
+      this.host.transact((tx) => {
         tx.editText(id, local.index, local.deleteCount, local.insert);
         if (fitted) tx.update(id, fitted);
       });
@@ -287,8 +297,14 @@ export class TextEditor {
     el.scrollTop = 0;
 
     // Top-left of the text in the shape's frame (text shapes from their top,
-    // the rest centered), turned with the shape, then to screen pixels.
-    const top = shape.type === "text" ? (-shape.h / 2) * zoom : -height / 2;
+    // a frame's name above it, the rest centered), turned with the shape,
+    // then to screen pixels.
+    const top =
+      shape.type === "text"
+        ? (-shape.h / 2) * zoom
+        : shape.type === "frame"
+          ? (-shape.h / 2 - FRAME_LABEL_GAP) * zoom - height
+          : -height / 2;
     const left = layout.x * zoom;
     const cos = Math.cos(shape.rotation);
     const sin = Math.sin(shape.rotation);

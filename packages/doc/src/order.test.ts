@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { generateNKeysBetween } from "fractional-indexing";
 import { describe, expect, it } from "vitest";
-import { compareOrder, isValidIndex, reorderStep, reorderToEnd } from "./order";
+import { compareOrder, indexesBetween, isValidIndex, reorderStep, reorderToEnd } from "./order";
 
 interface Item {
   id: string;
@@ -109,4 +109,18 @@ describe("reorderToEnd", () => {
       );
     },
   );
+});
+
+describe("indexesBetween", () => {
+  it("puts keys between two bounds, or above the lower one when they tie", () => {
+    const [a, b] = generateNKeysBetween(null, null, 2) as [string, string];
+    const keys = indexesBetween(a, b, 3);
+    expect(keys).toHaveLength(3);
+    for (const key of keys) {
+      expect(key > a && key < b).toBe(true);
+    }
+    expect([...keys].sort()).toEqual(keys);
+    for (const key of indexesBetween(b, a, 2)) expect(key > b).toBe(true);
+    for (const key of indexesBetween(a, a, 2)) expect(key > a).toBe(true);
+  });
 });

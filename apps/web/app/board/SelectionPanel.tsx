@@ -4,19 +4,26 @@ import {
   BringForwardIcon,
   BringToFrontIcon,
   DuplicateIcon,
+  GroupIcon,
   SendBackwardIcon,
   SendToBackIcon,
   TrashIcon,
+  UngroupIcon,
 } from "./icons";
 import { useEngineState } from "./useEngineState";
 import { usePrefersDark } from "./usePrefersDark";
 
 const NO_SELECTION: readonly string[] = [];
 
-/** Color, order, duplicate and delete for the selected shapes. Hidden when nothing is selected. */
+/**
+ * Color, order, grouping, duplicate and delete for the selected shapes.
+ * Hidden when nothing is selected.
+ */
 export function SelectionPanel({ engine }: { engine: Engine }) {
   const selection = useEngineState(engine, (s) => s.selection, NO_SELECTION);
   const color = useEngineState(engine, (s) => s.selectionColor, null);
+  const canGroup = useEngineState(engine, (s) => s.canGroup, false);
+  const canUngroup = useEngineState(engine, (s) => s.canUngroup, false);
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
   // Swatches show each color the way the board draws it in this theme.
   const palette = usePrefersDark() ? DARK_PALETTE : LIGHT_PALETTE;
@@ -75,6 +82,29 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
       >
         <SendToBackIcon />
       </button>
+      {(canGroup || canUngroup) && <span className="divider" />}
+      {canGroup && (
+        <button
+          type="button"
+          aria-label="Group"
+          title="Group (Ctrl G)"
+          data-testid="group"
+          onClick={engine.groupSelection}
+        >
+          <GroupIcon />
+        </button>
+      )}
+      {canUngroup && (
+        <button
+          type="button"
+          aria-label="Ungroup"
+          title="Ungroup (Ctrl Shift G)"
+          data-testid="ungroup"
+          onClick={engine.ungroupSelection}
+        >
+          <UngroupIcon />
+        </button>
+      )}
       <span className="divider" />
       <button
         type="button"

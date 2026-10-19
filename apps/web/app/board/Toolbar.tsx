@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   ArrowIcon,
   EllipseIcon,
+  FrameIcon,
   HandIcon,
   LineIcon,
   PenIcon,
@@ -25,6 +26,7 @@ const TOOLS: ReadonlyArray<{ tool: ToolName; label: string; key: string; icon: R
   { tool: "line", label: "Line", key: "L", icon: <LineIcon /> },
   { tool: "arrow", label: "Arrow", key: "A", icon: <ArrowIcon /> },
   { tool: "pen", label: "Pen", key: "P", icon: <PenIcon /> },
+  { tool: "frame", label: "Frame", key: "F", icon: <FrameIcon /> },
 ];
 
 /** Tool picker, plus undo and redo underneath. */

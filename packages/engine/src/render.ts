@@ -10,6 +10,8 @@ export interface Palette {
   /** Selection, handles and marquee. */
   accent: string;
   handleFill: string;
+  /** Frames: the plain surface (grey frames), the edge, and the name. */
+  frame: { fill: string; border: string; label: string };
 }
 
 const SOLID: Record<ColorName, string> = {
@@ -39,6 +41,7 @@ export const LIGHT_PALETTE: Palette = {
   paper: PAPER,
   accent: "#2563eb",
   handleFill: "#ffffff",
+  frame: { fill: "#ffffff", border: "#d4d4d8", label: "#6b7280" },
 };
 
 export const DARK_PALETTE: Palette = {
@@ -47,6 +50,7 @@ export const DARK_PALETTE: Palette = {
   paper: PAPER,
   accent: "#60a5fa",
   handleFill: "#1e1e24",
+  frame: { fill: "#232329", border: "#3f3f46", label: "#a1a1aa" },
 };
 
 export const LINE_WIDTH = 4;
@@ -116,8 +120,17 @@ export function drawShape(
         ctx.fill(extras.stroke);
       }
       break;
+    case "frame":
+      // Grey, the default, is the plain surface.
+      ctx.fillStyle = shape.color === "grey" ? palette.frame.fill : palette.paper[shape.color];
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.strokeStyle = palette.frame.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
+      break;
     case "text":
-      // Just the text.
+    case "group":
+      // Just the text; groups draw nothing of their own.
       break;
   }
   if (extras.text) drawText(ctx, extras.text, inkColor(shape, palette));

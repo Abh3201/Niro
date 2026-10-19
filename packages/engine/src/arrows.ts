@@ -13,9 +13,13 @@ import { shapeCenter } from "./shapes";
 /** Space between an attached end and its shape's outline, in world units. */
 export const ATTACH_GAP = 8;
 
-/** Arrows attach to boxes: anything but lines and other arrows. */
+/**
+ * Arrows attach to boxes: anything but lines, other arrows and groups. A
+ * group's box is worked out from what's in it after arrows are placed, and
+ * an arrow aimed at a group would point at the gaps between its shapes.
+ */
 export function canAttachTo(shape: Shape): boolean {
-  return !isLinear(shape.type);
+  return !isLinear(shape.type) && shape.type !== "group";
 }
 
 /**
