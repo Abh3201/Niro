@@ -1,3 +1,5 @@
+export * from "./camera";
 export { backingStoreSize } from "./canvas";
-export { createEngine, type Engine } from "./engine";
-export { type DrawContext, drawScene, PLACEHOLDER_RECT, type Viewport } from "./render";
+export { createEngine, type Engine, type EngineOptions, type EngineState } from "./engine";
+export type { Box, Point, Viewport } from "./geometry";
+export { PLACEHOLDER_RECT } from "./scene";

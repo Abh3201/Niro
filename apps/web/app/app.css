@@ -1,12 +1,22 @@
 :root {
   color-scheme: light dark;
   --board-bg: #f7f7f8;
+  --grid-dot: #c4c6cf;
+  --panel-bg: #ffffff;
+  --panel-border: #e2e3e8;
+  --panel-fg: #1f2024;
+  --panel-hover: #f0f1f4;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --board-bg: #18181b;
+    --grid-dot: #46464f;
+    --panel-bg: #232328;
+    --panel-border: #34343c;
+    --panel-fg: #ececf1;
+    --panel-hover: #2e2e35;
   }
 }
 
@@ -15,14 +25,47 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .board {
   position: fixed;
   inset: 0;
   background: var(--board-bg);
-  /* The engine handles every pointer gesture itself, including pinch and pan. */
-  touch-action: none;
+}
+
+.zoom-controls {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+  overflow: hidden;
+}
+
+.zoom-controls button {
+  min-width: 40px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--panel-fg);
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.zoom-controls button:hover {
+  background: var(--panel-hover);
+}
+
+.zoom-controls button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
 }
 
 .error-page {

@@ -4,7 +4,7 @@ Each lab in the roadmap ends with a short write-up here, explaining the idea in 
 
 | Lab | Topic | Write-up |
 |---|---|---|
-| L1 | Transform math: world vs screen coordinates, zoom toward the cursor | _not yet_ |
+| L1 | Transform math: world vs screen coordinates, zoom toward the cursor | [L1-transforms.md](L1-transforms.md) |
 | L2 | WebSocket from scratch on `node:net`: handshake, frames, masking | _not yet_ |
 | L3 | Your own last-writer-wins sync over a simulated network | _not yet_ |
 | L4 | Toy CRDTs: LWW-Map with Lamport clocks, RGA for text | _not yet_ |
