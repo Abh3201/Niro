@@ -58,6 +58,8 @@ RT=niro-rt-yourname
 SECRET=$(openssl rand -hex 32)   # keep this; see "Keep NIRO_SECRET" below
 DATABASE_URL='postgresql://...neon.tech/neondb?sslmode=require'
 
+# New subscriptions have App Service switched off; this turns it on once (a minute or two).
+az provider register --namespace Microsoft.Web --wait
 az group create --name $RG --location $LOCATION
 az appservice plan create --resource-group $RG --name niro-plan --is-linux --sku F1
 
@@ -112,4 +114,5 @@ Both apps must have the same `NIRO_SECRET`, and it must stay the same: it signs 
 | `403 Site Disabled` | An app used its 60 CPU minutes for the day. It comes back at midnight UTC. |
 | The first visit takes a long time | The apps were unloaded while idle. Expected on the free tier. |
 | Every link stopped working | `NIRO_SECRET` changed on one or both apps. |
+| `MissingSubscriptionRegistration ... Microsoft.Web` | App Service isn't registered on the subscription yet. Run `az provider register --namespace Microsoft.Web --wait`, then try again. |
 | The realtime app won't start | **Log stream** in the Azure portal shows why. `DATABASE_URL is not set` or a Postgres error means the Neon string is missing or wrong. |
