@@ -178,6 +178,15 @@ importers:
         specifier: ^4.23.15
         version: 4.23.15
 
+  labs/l7-yjs-update:
+    dependencies:
+      '@niro/doc':
+        specifier: workspace:*
+        version: link:../../packages/doc
+      yjs:
+        specifier: ^13.6.33
+        version: 13.6.33
+
   packages/doc:
     dependencies:
       fractional-indexing:
