@@ -21,7 +21,7 @@ No server of your own? [deploy-azure.md](deploy-azure.md) runs a small demo on A
 
 ## Put it on a server, with HTTPS
 
-[`compose.https.yml`](../compose.https.yml) adds [Caddy](https://caddyserver.com) in front of both services. Caddy gets a certificate from Let's Encrypt, sends the board's WebSocket (`/ws`) to the realtime server and everything else to the web app, all on one domain. Only Caddy is published; the web app, the realtime server's `/healthz` and `/metrics`, and Postgres stay inside the compose network.
+[`compose.https.yml`](../compose.https.yml) adds [Caddy](https://caddyserver.com) in front of both services. Caddy gets a certificate from Let's Encrypt, sends the board's WebSocket (`/ws`) and its images (`/assets/`) to the realtime server and everything else to the web app, all on one domain. Only Caddy is published; the web app, the realtime server's `/healthz` and `/metrics`, and Postgres stay inside the compose network.
 
 ```sh
 cat > .env <<EOF
@@ -40,7 +40,7 @@ Put the two `-f` options in `COMPOSE_FILE` so the shorter commands below work: a
 
 Any proxy that passes WebSockets works. It needs to:
 
-1. Send `/ws` (with its query string) to the realtime server, port 8787, with the WebSocket upgrade headers. The connection stays open as long as the board is; the server pings every 30 seconds, so a proxy idle timeout of 60 seconds or more is enough.
+1. Send `/ws` (with its query string) to the realtime server, port 8787, with the WebSocket upgrade headers. The connection stays open as long as the board is; the server pings every 30 seconds, so a proxy idle timeout of 60 seconds or more is enough. Send `/assets/` there too: it's where images are uploaded and loaded, so allow request bodies of `NIRO_MAX_IMAGE_MB` (nginx's default is 1 MB).
 2. Send everything else to the web app, port 3000.
 3. Have `PUBLIC_REALTIME_URL` set on the web app to where browsers reach the realtime server, `wss://board.example.com` here. Browsers add `/ws` themselves.
 
@@ -53,6 +53,10 @@ location = /ws {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_read_timeout 3600s;
+}
+location /assets/ {
+    proxy_pass http://127.0.0.1:8787;
+    client_max_body_size 6m;
 }
 location / {
     proxy_pass http://127.0.0.1:3000;
@@ -79,6 +83,8 @@ Set these in `.env`, next to `docker-compose.yml`.
 | `NIRO_MAX_CONNECTIONS_PER_BOARD` | 100 | People (browser tabs) on one board at once; more are turned away. |
 | `NIRO_MAX_OPEN_MB` | 40 | The realtime server's memory budget: MB of open boards, together. Past it, boards nobody has open are turned away until some close; open boards keep working. Allow about 25 MB of memory per MB set here. |
 | `NIRO_MAX_CONNECTIONS` | 2000 | People (browser tabs) on the whole realtime server at once; more are turned away. |
+| `NIRO_MAX_IMAGE_MB` | 5 | Largest image file. Browsers shrink pictures bigger than 2048 pixels or 1 MB before uploading, so few come near it. |
+| `NIRO_MAX_BOARD_IMAGES_MB` | 50 | All of one board's images together, in Postgres. Past it, new images on that board are refused. |
 
 ## Backups
 

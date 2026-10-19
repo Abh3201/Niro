@@ -1,6 +1,7 @@
 import { type ColorName, isLinear, type Shape } from "@niro/doc";
 import { PEN_SIZE } from "./freehand";
 import { type Box, boxFromPoints, rotateAround, unionBoxes } from "./geometry";
+import { reactionsExtent } from "./reactions";
 import { shapeCenter, shapeExtent } from "./shapes";
 import { FONT_FAMILY, inkColor, LINE_HEIGHT, MEASURE_SIZE, type TextLayout } from "./text";
 
@@ -65,6 +66,13 @@ const GREEK_BELOW_PX = 4;
  * drawn with text): anything outside it is off screen when the box is.
  */
 export function drawnExtent(shape: Shape, layout?: TextLayout): Box {
+  const box = shapeBoxExtent(shape, layout);
+  // Reactions are drawn under the shape.
+  const reactions = reactionsExtent(shape);
+  return reactions ? (unionBoxes([box, reactions]) ?? box) : box;
+}
+
+function shapeBoxExtent(shape: Shape, layout?: TextLayout): Box {
   const box = shapeExtent(shape);
   const pad = isLinear(shape.type)
     ? // Round caps, and an arrowhead's wings.
@@ -110,6 +118,8 @@ export interface ShapeExtras {
   readonly text?: ShapeText;
   /** A freehand stroke's outline, in its own frame. */
   readonly stroke?: Path2D;
+  /** An image's picture, once loaded; until then a placeholder is drawn. */
+  readonly image?: CanvasImageSource;
 }
 
 /** Below this size on screen, in CSS pixels, a sticky note has no shadow: it would be a smudge. */
@@ -188,6 +198,17 @@ export function drawShape(
       ctx.strokeStyle = palette.frame.border;
       ctx.lineWidth = 1;
       ctx.strokeRect(left, top, w, h);
+      break;
+    case "image":
+      if (extras.image) {
+        ctx.drawImage(extras.image, left, top, w, h);
+      } else {
+        ctx.fillStyle = palette.paper.grey;
+        ctx.fillRect(left, top, w, h);
+        ctx.strokeStyle = palette.frame.border;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(left, top, w, h);
+      }
       break;
     case "text":
     case "group":

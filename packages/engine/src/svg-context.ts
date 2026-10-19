@@ -229,6 +229,18 @@ export class SvgContext {
     );
   }
 
+  /**
+   * An image, embedded as a PNG data URL. Needs a DOM to encode it; without
+   * one, the image is left out.
+   */
+  drawImage(image: CanvasImageSource, x: number, y: number, w: number, h: number): void {
+    const href = dataUrl(image);
+    if (href)
+      this.body.push(
+        `<image${this.box(x, y, w, h)} preserveAspectRatio="none" href="${xml(href)}"${this.matrixAttr()}/>`,
+      );
+  }
+
   /** The finished document, showing `box` (in drawing coordinates) at `width` × `height`. */
   toSvg(
     box: { x: number; y: number; w: number; h: number },
@@ -272,6 +284,19 @@ export class SvgContext {
   private box(x: number, y: number, w: number, h: number): string {
     return ` x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}"`;
   }
+}
+
+/** A picture as a PNG data URL, or null where there's no canvas to encode it with. */
+function dataUrl(image: CanvasImageSource): string | null {
+  if (typeof document === "undefined") return null;
+  const source = image as CanvasImageSource & { width: number; height: number };
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(Number(source.width) || 1));
+  canvas.height = Math.max(1, Math.round(Number(source.height) || 1));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(image, 0, 0);
+  return canvas.toDataURL("image/png");
 }
 
 /** A number, short: SVG doesn't need 17 digits. */

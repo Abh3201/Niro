@@ -1,3 +1,4 @@
+import { USER_ID } from "@niro/doc";
 import type { Engine, Point, RemotePeer } from "@niro/engine";
 import type { Awareness } from "y-protocols/awareness";
 
@@ -85,6 +86,29 @@ export function loadIdentity(): Identity {
   const identity = { name: `${pick(ADJECTIVES)} ${pick(ANIMALS)}`, color: pick(PEER_COLORS) };
   saveIdentity(identity);
   return identity;
+}
+
+const USER_ID_STORAGE = "niro:user-id";
+
+/**
+ * This browser's id for reactions, made up the first time and remembered
+ * (or, without storage, for this visit). Not a secret and not an account:
+ * it only lets you take back your own reactions.
+ */
+export function loadUserId(): string {
+  try {
+    const stored = localStorage.getItem(USER_ID_STORAGE);
+    if (stored && USER_ID.test(stored)) return stored;
+  } catch {
+    // No storage: an id for this visit.
+  }
+  const id = crypto.randomUUID().replaceAll("-", "");
+  try {
+    localStorage.setItem(USER_ID_STORAGE, id);
+  } catch {
+    // Not remembered.
+  }
+  return id;
 }
 
 function saveIdentity(identity: Identity): void {

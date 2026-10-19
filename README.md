@@ -21,6 +21,8 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Zoom | Ctrl/Cmd + scroll, trackpad pinch, two-finger pinch on touch screens, or the buttons bottom-right. Ctrl/Cmd + `=`, `-`, `0` step in, out and back to 100% |
 | Export | `PNG` or `SVG` bottom-right downloads the selection, or the whole board when nothing is selected, in light colors on white |
 | Keyboard | `Tab` / Shift + `Tab` step through shapes in reading order (frames, then what's in them), and past the last shape on to the rest of the page. `?` lists every shortcut. Screen readers announce the selected shape and can read a list of the board's shapes |
+| Add an image | The image button in the toolbar, paste one (Ctrl/Cmd + `V`), or drop a file on the board. PNG, JPEG, GIF or WebP; big pictures are shrunk to 2048 pixels. Resizing keeps its proportions; Shift lets them go |
+| React | Select shapes and pick an emoji in the panel at the top: 👍 ❤️ 😂 🎉 😮 👀. Everyone sees the counts under the shape; pick it again to take yours back |
 | Share | **Share**, top right: an edit link and a view-only link, and your name as others see it. Whoever has a link has that access; there are no accounts |
 
 ## Run it with Docker
@@ -41,6 +43,7 @@ The realtime server listens on http://localhost:8787: WebSockets on `/ws`, `/hea
 - `PUBLIC_REALTIME_URL`: where browsers open the WebSocket (`ws://` or `wss://`). By default, the web app's host on port 8787. Set it behind a reverse proxy, with HTTPS, or if you change `REALTIME_PORT`.
 - `METRICS_TOKEN`: makes `/metrics` require `Authorization: Bearer <token>`. Set it when port 8787 is reachable from the internet.
 - `NIRO_MAX_SHAPES` (10,000), `NIRO_MAX_BOARD_MB` (5) and `NIRO_MAX_CONNECTIONS_PER_BOARD` (100): limits per board. A board that reaches the first two turns read-only for everyone, and says so.
+- `NIRO_MAX_IMAGE_MB` (5) and `NIRO_MAX_BOARD_IMAGES_MB` (50): the largest image file, and all of a board's images together.
 - `NIRO_MAX_OPEN_MB` (40) and `NIRO_MAX_CONNECTIONS` (2,000): limits for the whole realtime server. An open board takes about 25 times its stored size in memory, so 40 MB of open boards is about 1 GB. See [docs/self-hosting.md](docs/self-hosting.md#limits-to-know-about).
 
 Run one realtime server per database: two would each compact away the other's writes. Outside Docker it needs `DATABASE_URL`, unless `NODE_ENV` isn't `production`, when it keeps boards in memory.

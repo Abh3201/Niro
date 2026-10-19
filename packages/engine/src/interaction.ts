@@ -543,7 +543,8 @@ export class Interaction {
           if (shape)
             this.write(g.before, (s) =>
               s.id === shape.id
-                ? resizeBox(shape, handle, p.world, p.shiftKey)
+                ? // An image keeps its proportions unless Shift is held; other shapes, only while it is.
+                  resizeBox(shape, handle, p.world, p.shiftKey !== (shape.type === "image"))
                 : { x: s.x, y: s.y },
             );
         } else {

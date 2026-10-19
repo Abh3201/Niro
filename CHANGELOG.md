@@ -13,6 +13,8 @@ The first release: a whiteboard you can run yourself and share by link.
 - Arrows stay attached to the shapes they connect.
 - A pen that follows pressure, and ignores the palm resting on a tablet.
 - Groups, and frames that hold and clip their contents.
+- Images: add one with the toolbar button, by pasting, or by dropping a file on the board. Files are kept by the realtime server, not in the board.
+- Emoji reactions on any shape, shown under it for everyone.
 - Pan and zoom with a mouse, a trackpad or touch.
 - Export the selection or the whole board as PNG or SVG.
 - Light and dark boards: they follow the system theme, or switch with the button next to the zoom controls. Each browser remembers its own choice.

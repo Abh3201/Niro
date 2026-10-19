@@ -1,4 +1,5 @@
 import type { Shape, ShapeId } from "@niro/doc";
+import { drawReactions } from "./reactions";
 import { drawShape, type Palette } from "./render";
 import type { Scene } from "./scene";
 import type { TextLayout } from "./text";
@@ -14,6 +15,8 @@ export interface PaintOptions {
   textLayout(shape: Shape): TextLayout | undefined;
   /** A freehand stroke's outline. */
   stroke(shape: Shape): Path2D | undefined;
+  /** An image's picture, or undefined while it loads (or when there's none to draw). */
+  image?(shape: Shape): CanvasImageSource | undefined;
 }
 
 /**
@@ -48,7 +51,19 @@ export function paintShapes(
     const layout = options.textLayout(shape);
     const text = layout && { layout, baseline, zoom };
     const stroke = shape.type === "freehand" ? options.stroke(shape) : undefined;
-    drawShape(ctx, shape, palette, zoom, { ...(text && { text }), ...(stroke && { stroke }) });
+    const image = shape.type === "image" ? options.image?.(shape) : undefined;
+    drawShape(ctx, shape, palette, zoom, {
+      ...(text && { text }),
+      ...(stroke && { stroke }),
+      ...(image && { image }),
+    });
+    if (shape.reactions)
+      drawReactions(
+        ctx,
+        shape,
+        { fill: palette.handleFill, border: palette.frame.border, text: palette.frame.label },
+        zoom,
+      );
   }
   if (clipped.length > 0) ctx.restore();
   return list.length;

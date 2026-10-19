@@ -1,5 +1,6 @@
 import type { BoardStorage } from "@niro/sync";
 import pg from "pg";
+import type { AssetStorage, ImageType, PutResult, StoredAsset } from "./assets";
 
 /**
  * The schema, one step per entry, applied in order and recorded in
@@ -23,6 +24,16 @@ const MIGRATIONS: readonly string[] = [
      created_at timestamptz NOT NULL DEFAULT now(),
      PRIMARY KEY (board_id, seq)
    );`,
+  // Images, by board and SHA-256. No reference to boards: an image can be
+  // uploaded before the board's first write.
+  `CREATE TABLE board_assets (
+     board_id text NOT NULL,
+     id text NOT NULL,
+     type text NOT NULL,
+     data bytea NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     PRIMARY KEY (board_id, id)
+   );`,
 ];
 
 /** Advisory lock key for migrations: any number, as long as nothing else uses it. */
@@ -39,7 +50,7 @@ export interface PostgresOptions {
  * Boards in Postgres. One realtime server per database: two servers
  * writing the same board would each compact away the other's rows.
  */
-export class PostgresStorage implements BoardStorage {
+export class PostgresStorage implements BoardStorage, AssetStorage {
   private constructor(private readonly pool: pg.Pool) {}
 
   /** Connects and brings the schema up to date. */
@@ -96,6 +107,50 @@ export class PostgresStorage implements BoardStorage {
       );
       await client.query("DELETE FROM board_updates WHERE board_id = $1", [boardId]);
     });
+  }
+
+  async put(
+    boardId: string,
+    id: string,
+    asset: StoredAsset,
+    maxBoardBytes: number,
+  ): Promise<PutResult> {
+    let result: PutResult = "stored";
+    await this.transaction(async (client) => {
+      // One upload per board at a time, so two can't both fit under the cap.
+      await client.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [
+        MIGRATION_LOCK,
+        boardId,
+      ]);
+      const { rows } = await client.query<{ total: string; present: boolean }>(
+        `SELECT coalesce(sum(length(data)), 0) AS total, bool_or(id = $2) AS present
+         FROM board_assets WHERE board_id = $1`,
+        [boardId, id],
+      );
+      const row = rows[0];
+      if (row?.present) {
+        result = "exists";
+        return;
+      }
+      if (Number(row?.total ?? 0) + asset.data.byteLength > maxBoardBytes) {
+        result = "full";
+        return;
+      }
+      await client.query(
+        "INSERT INTO board_assets (board_id, id, type, data) VALUES ($1, $2, $3, $4)",
+        [boardId, id, asset.type, asset.data],
+      );
+    });
+    return result;
+  }
+
+  async get(boardId: string, id: string): Promise<StoredAsset | null> {
+    const { rows } = await this.pool.query<{ type: string; data: Buffer }>(
+      "SELECT type, data FROM board_assets WHERE board_id = $1 AND id = $2",
+      [boardId, id],
+    );
+    const row = rows[0];
+    return row ? { type: row.type as ImageType, data: row.data } : null;
   }
 
   /** Closes every connection. Call after the last write. */

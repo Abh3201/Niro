@@ -1,4 +1,4 @@
-import type { Shape, ShapeId, ShapeType } from "@niro/doc";
+import { REACTION_NAMES, type Shape, type ShapeId, type ShapeType } from "@niro/doc";
 import type { Scene } from "./scene";
 import { shapeBounds } from "./shapes";
 
@@ -18,6 +18,7 @@ const NAMES: Readonly<Record<ShapeType, string>> = {
   freehand: "Pen stroke",
   group: "Group",
   frame: "Frame",
+  image: "Image",
 };
 
 /** Longest stretch of a shape's text read out. */
@@ -37,8 +38,18 @@ export function describeShape(scene: Scene, id: ShapeId): string {
     const n = scene.childrenOf(id).length;
     return `Frame${excerpt ? ` "${excerpt}"` : ""}, holding ${n} ${n === 1 ? "shape" : "shapes"}`;
   }
-  const color = shape.type === "text" || shape.type === "freehand" ? "" : `, ${shape.color}`;
-  return `${NAMES[shape.type]}${color}${excerpt ? `: ${excerpt}` : ""}`;
+  const color =
+    shape.type === "text" || shape.type === "freehand" || shape.type === "image"
+      ? ""
+      : `, ${shape.color}`;
+  return `${NAMES[shape.type]}${color}${excerpt ? `: ${excerpt}` : ""}${describeReactions(shape)}`;
+}
+
+/** ", 3 reactions", or nothing. */
+function describeReactions(shape: Shape): string {
+  let n = 0;
+  for (const name of REACTION_NAMES) n += shape.reactions?.[name]?.length ?? 0;
+  return n === 0 ? "" : `, ${n} ${n === 1 ? "reaction" : "reactions"}`;
 }
 
 /**

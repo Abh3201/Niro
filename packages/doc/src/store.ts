@@ -1,4 +1,4 @@
-import type { Shape, ShapeId, ShapePatch } from "./shape";
+import type { ReactionName, Shape, ShapeId, ShapePatch } from "./shape";
 
 /** Who made a change: this user (including their undo and redo), or a collaborator. */
 export type Origin = "local" | "remote";
@@ -39,6 +39,8 @@ export interface Tx {
    */
   editText(id: ShapeId, index: number, deleteCount: number, insert: string): void;
   remove(id: ShapeId): void;
+  /** Adds (`on`) or takes back `user`'s reaction to a shape. */
+  react(id: ShapeId, reaction: ReactionName, user: string, on: boolean): void;
 }
 
 /**

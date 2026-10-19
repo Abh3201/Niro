@@ -8,8 +8,9 @@ import { isValidIndex } from "./order";
  * 2: text shapes, and text on rectangles, ellipses and sticky notes.
  * 3: freehand strokes, and arrows that can be attached to shapes.
  * 4: groups and frames, with positions inside a frame measured from the frame.
+ * 5: images, and emoji reactions on shapes.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
@@ -26,6 +27,7 @@ export const SHAPE_TYPES = [
   "arrow",
   "group",
   "frame",
+  "image",
 ] as const;
 export type ShapeType = (typeof SHAPE_TYPES)[number];
 
@@ -85,7 +87,51 @@ export const DEFAULT_COLOR: Record<ShapeType, ColorName> = {
   group: "black",
   // Grey frames are the plain board surface (white, or dark in the dark theme).
   frame: "grey",
+  // Images have no color of their own.
+  image: "grey",
 };
+
+/**
+ * The reactions anyone can put on a shape, stored by name so the stored
+ * value never depends on how an emoji is encoded.
+ */
+export const REACTIONS = {
+  like: "👍",
+  love: "❤️",
+  laugh: "😂",
+  party: "🎉",
+  wow: "😮",
+  eyes: "👀",
+} as const;
+export type ReactionName = keyof typeof REACTIONS;
+export const REACTION_NAMES = Object.keys(REACTIONS) as ReactionName[];
+
+/**
+ * Who reacted to a shape, by reaction, in `REACTION_NAMES` order; a
+ * reaction nobody gave is left out. Ids are each browser's own random id
+ * (there are no accounts), sorted.
+ */
+export type Reactions = Readonly<Partial<Record<ReactionName, readonly string[]>>>;
+
+/** A browser's id, as reactions store it. */
+export const USER_ID = /^[A-Za-z0-9_-]{8,32}$/;
+
+/**
+ * Key in a shape's stored fields for one person's reaction. One key per
+ * person and reaction means adding and removing your own can never undo
+ * someone else's, whatever order the changes arrive in.
+ */
+export const reactionKey = (reaction: ReactionName, user: string): string =>
+  `reaction.${reaction}.${user}`;
+
+/**
+ * Images are stored apart from the board (the board holds only this id):
+ * the SHA-256 of the file's bytes, in hex.
+ */
+export const ASSET_ID = /^[0-9a-f]{64}$/;
+
+/** Most people whose reactions are read per shape: past it, a hostile client could freeze every tab. */
+const MAX_REACTIONS = 1_000;
 
 /** Smallest width and height a box shape can have, in world units. */
 export const MIN_SIZE = 1;
@@ -145,10 +191,16 @@ export interface Shape {
   readonly from: ShapeId | null;
   /** The shape an arrow's end is attached to, or null. Always null on other shapes. */
   readonly to: ShapeId | null;
+  /** An image's file (see `ASSET_ID`). Only on images, set when added and never changed. */
+  readonly asset?: string;
+  /** Emoji reactions, when there are any. Changed with `Tx.react`. */
+  readonly reactions?: Reactions;
 }
 
-/** Fields `Tx.update` can set. Text changes go through `Tx.editText`; points never change. */
-export type ShapePatch = Partial<Omit<Shape, "id" | "type" | "text" | "points">>;
+/** Fields `Tx.update` can set. Text changes go through `Tx.editText`, reactions through `Tx.react`; points and assets never change. */
+export type ShapePatch = Partial<
+  Omit<Shape, "id" | "type" | "text" | "points" | "asset" | "reactions">
+>;
 
 const TAU = Math.PI * 2;
 
@@ -199,6 +251,8 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const isArrow = shapeType === "arrow";
   const attached = (value: unknown) =>
     isArrow && typeof value === "string" && value !== id ? (value as ShapeId) : null;
+  const asset = raw.asset;
+  const reactions = readReactions(raw);
 
   return {
     id: id as ShapeId,
@@ -218,7 +272,36 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     points: shapeType === "freehand" ? readPoints(raw.points) : [],
     from: attached(raw.from),
     to: attached(raw.to),
+    ...(shapeType === "image" && {
+      asset: typeof asset === "string" && ASSET_ID.test(asset) ? asset : "",
+    }),
+    ...(reactions && { reactions }),
   };
+}
+
+/** The reactions in a shape's stored fields, or undefined when there are none. */
+function readReactions(raw: Readonly<Record<string, unknown>>): Reactions | undefined {
+  let found: Partial<Record<ReactionName, string[]>> | undefined;
+  let count = 0;
+  for (const key in raw) {
+    if (!key.startsWith("reaction.") || raw[key] !== true) continue;
+    const dot = key.indexOf(".", 9);
+    const name = key.slice(9, dot);
+    const user = key.slice(dot + 1);
+    if (dot < 0 || !Object.hasOwn(REACTIONS, name) || !USER_ID.test(user)) continue;
+    if (++count > MAX_REACTIONS) break;
+    found ??= {};
+    const users = found[name as ReactionName];
+    if (users) users.push(user);
+    else found[name as ReactionName] = [user];
+  }
+  if (!found) return undefined;
+  const sorted: Partial<Record<ReactionName, readonly string[]>> = {};
+  for (const name of REACTION_NAMES) {
+    const users = found[name];
+    if (users) sorted[name] = users.sort();
+  }
+  return sorted;
 }
 
 /** Frames and groups stay upright; lines and arrows turn by moving their ends. */

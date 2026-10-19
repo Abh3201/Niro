@@ -8,10 +8,25 @@
  *   (one moves it, one recolors it) both keep their change.
  * - A shape's `text` is a Y.Text inside its map, created with the shape, so
  *   two people typing in it merge character by character.
+ * - A reaction is a key of its own in the shape's map,
+ *   `reaction.<name>.<user>`, set to true: adding and removing your own
+ *   reaction never touches anyone else's.
+ * - An image's map holds only its file's id (`asset`); the file is kept by
+ *   the realtime server (docs/decisions/0008-images-and-reactions.md).
  * - `meta`: Y.Map with `schemaVersion`.
  */
 import * as Y from "yjs";
-import { holdsText, readShape, SCHEMA_VERSION, type Shape, type ShapeId } from "./shape";
+import {
+  ASSET_ID,
+  holdsText,
+  REACTIONS,
+  reactionKey,
+  readShape,
+  SCHEMA_VERSION,
+  type Shape,
+  type ShapeId,
+  USER_ID,
+} from "./shape";
 import type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
 
 /** Transaction origin for this user's edits; the undo manager tracks only these. */
@@ -132,9 +147,12 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
 
   const tx: Tx = {
     add(shape) {
-      const { id, text, points, from, to, ...fields } = shape;
+      // A copy starts with no reactions.
+      const { id, text, points, from, to, asset, reactions: _, ...fields } = shape;
       const map = new Y.Map<unknown>();
       for (const [key, value] of Object.entries(fields)) map.set(key, value);
+      if (shape.type === "image" && asset !== undefined && ASSET_ID.test(asset))
+        map.set("asset", asset);
       // Fields most shapes don't use are left out rather than stored empty.
       if (points.length > 0) map.set("points", [...points]);
       if (from !== null) map.set("from", from);
@@ -150,12 +168,20 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
       for (const [key, value] of Object.entries(patch)) {
         // A whole shape passed as a patch must not replace its Y.Text with a
         // string, or rewrite a stroke's points.
-        if (key === "text" || key === "points") continue;
+        if (key === "text" || key === "points" || key === "asset" || key === "reactions") continue;
         if (value !== undefined && map.get(key) !== value) map.set(key, value);
       }
     },
     remove(id) {
       shapes.delete(id);
+    },
+    react(id, reaction, user, on) {
+      const map = shapes.get(id);
+      if (!(map instanceof Y.Map) || !Object.hasOwn(REACTIONS, reaction) || !USER_ID.test(user))
+        return;
+      const key = reactionKey(reaction, user);
+      if (on && map.get(key) !== true) map.set(key, true);
+      else if (!on && map.has(key)) map.delete(key);
     },
     editText(id, index, deleteCount, insert) {
       const map = shapes.get(id);
