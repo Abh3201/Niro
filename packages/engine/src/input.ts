@@ -1,4 +1,5 @@
 import { type Camera, panBy, screenToWorld, wheelZoomFactor, zoomAt } from "./camera";
+import type { PenPoint } from "./freehand";
 import { distance, type Point, type Viewport } from "./geometry";
 import { pinchCamera } from "./gestures";
 import type { ToolPointer } from "./interaction";
@@ -59,6 +60,8 @@ export class InputController {
   private pan: { pointerId: number; last: Point } | null = null;
   /** The pointer the active tool is tracking, if any. */
   private toolPointer: number | null = null;
+  /** True while the tool pointer is a pen, whose stroke a resting palm mustn't interrupt. */
+  private penDown = false;
   private pinch: [number, number] | null = null;
   private gestureStartZoom: number | null = null;
   private spaceDown = false;
@@ -117,7 +120,19 @@ export class InputController {
       screen,
       world: screenToWorld(this.host.getCamera(), screen),
       shiftKey: event.shiftKey,
+      pressure: pressureOf(event),
     };
+  }
+
+  /** The moves a browser merged into `event`, as pen points, oldest first. */
+  private samplesOf(event: PointerEvent): PenPoint[] | undefined {
+    const merged = event.getCoalescedEvents?.() ?? [];
+    if (merged.length < 2) return undefined;
+    const camera = this.host.getCamera();
+    return merged.map((e) => ({
+      ...screenToWorld(camera, this.local(e)),
+      pressure: pressureOf(e),
+    }));
   }
 
   /** Re-reads the cursor, for when the tool's hover target changed. */
@@ -128,6 +143,8 @@ export class InputController {
   private onPointerDown(event: PointerEvent): void {
     // Pressing in the text editor places its cursor or selects text.
     if (isEditable(event.target)) return;
+    // Palm rejection: a hand resting on the screen while a pen draws is ignored.
+    if (event.pointerType === "touch" && this.penDown) return;
     const point = this.local(event);
     this.pointers.set(event.pointerId, point);
     this.lastPointer = point;
@@ -142,6 +159,7 @@ export class InputController {
       this.pan = null;
       if (this.toolPointer !== null) {
         this.toolPointer = null;
+        this.penDown = false;
         this.host.toolCancel();
       }
       return;
@@ -158,6 +176,7 @@ export class InputController {
 
     if (this.host.toolDown(this.toolPointerFrom(event, point))) {
       this.toolPointer = event.pointerId;
+      this.penDown = event.pointerType === "pen";
       this.host.container.setPointerCapture?.(event.pointerId);
       this.updateCursor();
     } else {
@@ -206,7 +225,9 @@ export class InputController {
       this.host.setCamera(panBy(this.host.getCamera(), point.x - last.x, point.y - last.y));
       this.pan.last = point;
     } else if (this.toolPointer === event.pointerId) {
-      this.host.toolMove(this.toolPointerFrom(event, point));
+      const samples = this.samplesOf(event);
+      const pointer = this.toolPointerFrom(event, point);
+      this.host.toolMove(samples ? { ...pointer, samples } : pointer);
       this.updateCursor();
     }
   }
@@ -216,6 +237,7 @@ export class InputController {
 
     if (this.toolPointer === event.pointerId) {
       this.toolPointer = null;
+      this.penDown = false;
       if (event.type === "pointercancel") this.host.toolCancel();
       else this.host.toolUp(this.toolPointerFrom(event, this.local(event)));
     }
@@ -270,6 +292,7 @@ export class InputController {
       screen,
       world: screenToWorld(this.host.getCamera(), screen),
       shiftKey: event.shiftKey,
+      pressure: 0.5,
     });
   }
 
@@ -360,6 +383,7 @@ export class InputController {
     this.pointers.clear();
     if (this.toolPointer !== null) {
       this.toolPointer = null;
+      this.penDown = false;
       this.host.toolCancel();
     }
     this.updateCursor();
@@ -372,6 +396,11 @@ export class InputController {
       style.cursor = "grab";
     else style.cursor = this.host.toolCursor();
   }
+}
+
+/** Pen pressure; anything else reports 0.5 while pressed, or nothing useful (touch). */
+function pressureOf(event: PointerEvent): number {
+  return event.pointerType === "pen" ? event.pressure : 0.5;
 }
 
 function isButton(target: EventTarget | null): boolean {

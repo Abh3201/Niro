@@ -111,6 +111,7 @@ function setup() {
     screen,
     world: screenToWorld(camera, screen),
     shiftKey,
+    pressure: 0.5,
   });
   /** Press, move in steps (flushing a frame after each), release. */
   const drag = (from: Point, to: Point, shiftKey = false) => {
@@ -132,6 +133,7 @@ function setup() {
     drag,
     tool: () => tool,
     setTool: (t: ToolName) => host.setTool(t),
+    flush: () => host.flushWrite(),
     selection: () => selection,
     editing: () => editing,
   };
@@ -267,6 +269,9 @@ describe("Interaction", () => {
         index: "a0",
         color: "black",
         text: "x".repeat(20), // 200 wide in the test host: one line
+        points: [],
+        from: null,
+        to: null,
       }),
     );
     t.interaction.pointerDown(t.pointer({ x: 10, y: 10 }));
@@ -286,5 +291,118 @@ describe("Interaction", () => {
     t.doc.transact((tx) => tx.editText(id, 0, 0, "typed by someone else"));
     t.interaction.cancel();
     expect(t.doc.get(id)).toMatchObject({ x: 0, y: 0, text: "typed by someone else" });
+  });
+
+  it("draws with the pen, adding each stroke when it's finished and keeping the pen", () => {
+    const t = setup();
+    t.setTool("pen");
+    t.interaction.pointerDown(t.pointer({ x: 0, y: 0 }));
+    t.interaction.pointerMove(t.pointer({ x: 50, y: 20 }));
+    // A fast pen: the browser merged several moves into one event.
+    t.interaction.pointerMove({
+      ...t.pointer({ x: 100, y: 0 }),
+      samples: [
+        { x: 70, y: 15, pressure: 0.5 },
+        { x: 100, y: 0, pressure: 0.5 },
+      ],
+    });
+    // Only in the overlay while it's drawn.
+    expect(t.interaction.drawing()).toHaveLength(4);
+    expect([...t.doc.all()]).toHaveLength(0);
+    t.interaction.pointerUp(t.pointer({ x: 100, y: 0 }));
+
+    const [stroke] = [...t.doc.all()];
+    expect(stroke).toMatchObject({ type: "freehand", color: "black" });
+    expect(stroke?.points).toHaveLength(12);
+    expect(stroke?.x).toBeLessThan(0);
+    expect((stroke?.x ?? 0) + (stroke?.w ?? 0)).toBeGreaterThan(100);
+    expect(t.tool()).toBe("pen");
+    expect(t.interaction.drawing()).toBeNull();
+
+    // Escape drops a stroke being drawn.
+    t.interaction.pointerDown(t.pointer({ x: 0, y: 100 }));
+    t.interaction.pointerMove(t.pointer({ x: 50, y: 100 }));
+    t.interaction.cancel();
+    expect([...t.doc.all()]).toHaveLength(1);
+  });
+
+  /** Two boxes with an arrow dragged from inside one to inside the other. */
+  function arrowBetweenBoxes() {
+    const t = setup();
+    t.setTool("rectangle");
+    t.drag({ x: 0, y: 0 }, { x: 100, y: 100 });
+    t.setTool("rectangle");
+    t.drag({ x: 300, y: 0 }, { x: 400, y: 100 });
+    const [a, b] = [...t.doc.all()].map((shape) => shape.id);
+    t.setTool("arrow");
+    t.drag({ x: 50, y: 50 }, { x: 350, y: 50 });
+    const arrow = [...t.doc.all()].find((shape) => shape.type === "arrow") as Shape;
+    return { ...t, a: a as ShapeId, b: b as ShapeId, arrow: arrow.id };
+  }
+
+  it("attaches an arrow to the shapes it's dragged between", () => {
+    const t = arrowBetweenBoxes();
+    expect(t.doc.get(t.arrow)).toMatchObject({ from: t.a, to: t.b });
+    expect(t.selection()).toEqual([t.arrow]);
+    expect(t.tool()).toBe("select");
+    // Drawn between the outlines, not from where the drag started.
+    expect(t.scene.get(t.arrow)).toMatchObject({ x: 108, y: 50, w: 184, h: 0 });
+  });
+
+  it("lets an arrow go when it's moved without its shapes, and keeps them when they move with it", () => {
+    const t = arrowBetweenBoxes();
+    t.drag({ x: 200, y: 50 }, { x: 200, y: 250 });
+    expect(t.doc.get(t.arrow)).toMatchObject({ from: null, to: null, x: 108, y: 250, w: 184 });
+
+    const u = arrowBetweenBoxes();
+    u.drag({ x: -10, y: -10 }, { x: 410, y: 110 });
+    expect(u.selection()).toHaveLength(3);
+    u.drag({ x: 50, y: 50 }, { x: 50, y: 250 });
+    expect(u.doc.get(u.arrow)).toMatchObject({ from: u.a, to: u.b });
+    expect(u.scene.get(u.arrow)).toMatchObject({ x: 108, y: 250 });
+
+    // Escape puts a moved arrow back, attached again.
+    const v = arrowBetweenBoxes();
+    v.interaction.pointerDown(v.pointer({ x: 200, y: 50 }));
+    v.interaction.pointerMove(v.pointer({ x: 200, y: 300 }));
+    v.flush();
+    expect(v.doc.get(v.arrow)?.from).toBeNull();
+    v.interaction.cancel();
+    expect(v.doc.get(v.arrow)).toMatchObject({ from: v.a, to: v.b });
+  });
+
+  it("moves an arrow's free end with it, wherever its attached end is drawn", () => {
+    const t = setup();
+    t.setTool("rectangle");
+    t.drag({ x: 0, y: 0 }, { x: 100, y: 100 });
+    t.setTool("arrow");
+    t.drag({ x: 50, y: 50 }, { x: 600, y: 50 });
+    const arrow = [...t.doc.all()].find((shape) => shape.type === "arrow") as Shape;
+    expect(arrow.to).toBeNull();
+    // Both selected, then moved down 200.
+    t.drag({ x: -10, y: -10 }, { x: 610, y: 110 });
+    t.drag({ x: 50, y: 50 }, { x: 50, y: 250 });
+    const drawn = t.scene.get(arrow.id) as Shape;
+    expect(drawn.x + drawn.w).toBeCloseTo(600);
+    expect(drawn.y + drawn.h).toBeCloseTo(250);
+  });
+
+  it("attaches an arrow's end to the shape it's dropped on, and lets go on empty space", () => {
+    const t = arrowBetweenBoxes();
+    t.setTool("ellipse");
+    t.drag({ x: 300, y: 300 }, { x: 400, y: 400 });
+    const c = [...t.doc.all()].find((shape) => shape.type === "ellipse")?.id;
+    // Select the arrow, then drag its end handle onto the ellipse.
+    t.interaction.pointerDown(t.pointer({ x: 200, y: 50 }));
+    t.interaction.pointerUp(t.pointer({ x: 200, y: 50 }));
+    t.drag({ x: 292, y: 50 }, { x: 350, y: 350 });
+    expect(t.doc.get(t.arrow)).toMatchObject({ from: t.a, to: c });
+
+    const end = t.scene.get(t.arrow) as Shape;
+    t.drag({ x: end.x + end.w, y: end.y + end.h }, { x: 600, y: 600 });
+    expect(t.doc.get(t.arrow)).toMatchObject({ from: t.a, to: null });
+    const loose = t.scene.get(t.arrow) as Shape;
+    expect(loose.x + loose.w).toBeCloseTo(600);
+    expect(loose.y + loose.h).toBeCloseTo(600);
   });
 });

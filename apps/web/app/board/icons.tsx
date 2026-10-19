@@ -56,6 +56,19 @@ export const LineIcon = () => (
   </Icon>
 );
 
+export const ArrowIcon = () => (
+  <Icon>
+    <path d="M4 16L16 4M9 4h7v7" />
+  </Icon>
+);
+
+export const PenIcon = () => (
+  <Icon>
+    <path d="M13.5 3.5l3 3L7 16l-4 1 1-4z" />
+    <path d="M11.5 5.5l3 3" />
+  </Icon>
+);
+
 export const TextIcon = () => (
   <Icon>
     <path d="M4.5 5V3.5h11V5M10 3.5v13M7.5 16.5h5" />

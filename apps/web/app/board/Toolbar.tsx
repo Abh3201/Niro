@@ -1,9 +1,11 @@
 import type { Engine, ToolName } from "@niro/engine";
 import type { ReactNode } from "react";
 import {
+  ArrowIcon,
   EllipseIcon,
   HandIcon,
   LineIcon,
+  PenIcon,
   RectangleIcon,
   RedoIcon,
   SelectIcon,
@@ -21,6 +23,8 @@ const TOOLS: ReadonlyArray<{ tool: ToolName; label: string; key: string; icon: R
   { tool: "rectangle", label: "Rectangle", key: "R", icon: <RectangleIcon /> },
   { tool: "ellipse", label: "Ellipse", key: "O", icon: <EllipseIcon /> },
   { tool: "line", label: "Line", key: "L", icon: <LineIcon /> },
+  { tool: "arrow", label: "Arrow", key: "A", icon: <ArrowIcon /> },
+  { tool: "pen", label: "Pen", key: "P", icon: <PenIcon /> },
 ];
 
 /** Tool picker, plus undo and redo underneath. */

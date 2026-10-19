@@ -1,4 +1,4 @@
-import type { Shape } from "@niro/doc";
+import { isLinear, type Shape } from "@niro/doc";
 import { type Camera, screenToWorld, worldToScreen } from "./camera";
 import { type Box, distance, type Point, rotateAround } from "./geometry";
 import { lineEnds, shapeBounds, shapeCenter } from "./shapes";
@@ -13,7 +13,7 @@ export const ROTATE_HANDLE_OFFSET = 24;
 /**
  * What the selection's handles act on:
  * - one box shape: 8 resize handles and a rotate handle in its rotated frame;
- * - one line: a handle on each end;
+ * - one line or arrow: a handle on each end;
  * - several shapes: their combined bounding box, scaled uniformly from the
  *   corners and rotated around its center.
  */
@@ -37,7 +37,7 @@ export function selectionFrame(shapes: readonly Shape[]): SelectionFrame | null 
   const [first] = shapes;
   if (!first) return null;
   if (shapes.length === 1)
-    return first.type === "line" ? { kind: "line", shape: first } : { kind: "box", shape: first };
+    return isLinear(first.type) ? { kind: "line", shape: first } : { kind: "box", shape: first };
   let box = shapeBounds(first);
   for (const shape of shapes) {
     const b = shapeBounds(shape);

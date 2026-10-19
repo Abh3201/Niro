@@ -12,6 +12,9 @@ const valid = {
   index: "a0",
   color: "red",
   text: "hi",
+  points: [],
+  from: null,
+  to: null,
 };
 
 describe("readShape", () => {
@@ -48,6 +51,9 @@ describe("readShape", () => {
       index: "a0",
       color: "green",
       text: "",
+      points: [],
+      from: null,
+      to: null,
     });
   });
 
@@ -62,6 +68,45 @@ describe("readShape", () => {
       w: -30,
       h: -40,
       rotation: 0,
+    });
+  });
+});
+
+describe("readShape: strokes and arrows", () => {
+  it("reads a stroke's points as whole triples, clamped into range", () => {
+    const stroke = { ...valid, type: "freehand" };
+    expect(
+      readShape("f1", { ...stroke, points: [0, 10_000, 50, 5_000, 5_000, 100] })?.points,
+    ).toEqual([0, 10_000, 50, 5_000, 5_000, 100]);
+    expect(readShape("f1", { ...stroke, points: [-5, 20_000, 150] })?.points).toEqual([
+      0, 10_000, 100,
+    ]);
+    // Not triples, not numbers, or not a list: no points, rather than garbage.
+    expect(readShape("f1", { ...stroke, points: [1, 2] })?.points).toEqual([]);
+    expect(readShape("f1", { ...stroke, points: [1, "2", 3] })?.points).toEqual([]);
+    expect(readShape("f1", { ...stroke, points: [1, Number.NaN, 3] })?.points).toEqual([]);
+    expect(readShape("f1", { ...stroke, points: "1,2,3" })?.points).toEqual([]);
+    // Only strokes have points.
+    expect(readShape("s1", { ...valid, points: [1, 2, 3] })?.points).toEqual([]);
+  });
+
+  it("attaches only arrows, and never to themselves", () => {
+    const arrow = { ...valid, type: "arrow", w: -30, h: 40 };
+    expect(readShape("a1", { ...arrow, from: "s1", to: "s2" })).toMatchObject({
+      from: "s1",
+      to: "s2",
+      w: -30,
+      h: 40,
+      rotation: 0,
+      text: "",
+    });
+    expect(readShape("a1", { ...arrow, from: "a1", to: 7 })).toMatchObject({
+      from: null,
+      to: null,
+    });
+    expect(readShape("l1", { ...valid, type: "line", from: "s1", to: "s2" })).toMatchObject({
+      from: null,
+      to: null,
     });
   });
 });

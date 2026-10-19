@@ -2,12 +2,14 @@
 
 An open source, self-hostable whiteboard in the spirit of Miro, and a project for learning, from first principles, how canvas rendering, real-time collaboration and network transports work.
 
-**Status:** P4 (content). Sticky notes, rectangles, ellipses, lines and text you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo, and text in every shape but lines. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts.
+**Status:** P4 (content). Sticky notes, rectangles, ellipses, lines, arrows, pen strokes and text you can select, move, resize, rotate, recolor, reorder, duplicate and delete, with undo; text in every box shape; arrows that stay attached to the shapes they connect. Each visit to `/` starts a new board; share its link and others edit it with you live, with everyone's cursors and selections on screen. Boards are saved on the server (Postgres) and in each browser, so they work offline and survive restarts.
 
 | To | Do |
 |---|---|
-| Pick a tool | Toolbar on the left, or `V` select, `H` hand, `N` sticky note, `T` text, `R` rectangle, `O` ellipse, `L` line |
+| Pick a tool | Toolbar on the left, or `V` select, `H` hand, `N` sticky note, `T` text, `R` rectangle, `O` ellipse, `L` line, `A` arrow, `P` pen |
 | Add a shape | Drag with a shape tool, or click for a default size. Shift keeps boxes square and lines at 15° steps |
+| Draw | The pen draws until you pick another tool. A pen that senses pressure draws thicker when pressed harder; with a mouse or a finger, the line thins as it speeds up |
+| Connect | Drag the arrow tool from one shape to another: the arrow stays attached to both as they move. Drag an arrow's end onto a shape to attach it, or off to let go. Moving an arrow on its own lets go of both shapes |
 | Write | Type on a new sticky note. Double-click a shape, or select it and press `Enter`, to edit its text; `Esc` or a click elsewhere finishes. The text tool, or a double-click on empty space, starts a text; drag with the tool to set its width. Text in shapes shrinks to fit |
 | Select | Click, Shift + click to add or remove, drag a marquee on empty space, Ctrl/Cmd + `A` for all |
 | Move, resize, rotate | Drag the shape, a handle, or the round handle above it. Shift locks the axis, the aspect ratio or 15° steps. Arrow keys nudge (Shift: 10px). Esc cancels a drag |
@@ -86,8 +88,8 @@ Two rules keep the architecture honest:
 | P1 | Camera: pan, zoom, pinch, HiDPI, render only when something changed |
 | P2 | Document model and shapes, selection, z-order, undo (after a Yjs vs Loro spike) |
 | P3a | Multiplayer: rooms, sync, live cursors, share links |
-| **P3b** | Persistence, limits, network-fault simulation tests, metrics |
-| P4 | Text, pen, arrows, groups and frames |
+| P3b | Persistence, limits, network-fault simulation tests, metrics |
+| **P4** | Text, pen, arrows, groups and frames |
 | P5 | Performance: spatial index, culling, level of detail |
 | P6 | v0.1 release |
 

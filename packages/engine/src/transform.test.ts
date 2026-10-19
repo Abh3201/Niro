@@ -27,6 +27,9 @@ const box = (patch: Partial<Shape> = {}): Shape => ({
   index: "a0",
   color: "blue",
   text: "",
+  points: [],
+  from: null,
+  to: null,
   ...patch,
 });
 

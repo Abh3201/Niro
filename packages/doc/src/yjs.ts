@@ -131,9 +131,13 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
 
   const tx: Tx = {
     add(shape) {
-      const { id, text, ...fields } = shape;
+      const { id, text, points, from, to, ...fields } = shape;
       const map = new Y.Map<unknown>();
       for (const [key, value] of Object.entries(fields)) map.set(key, value);
+      // Fields most shapes don't use are left out rather than stored empty.
+      if (points.length > 0) map.set("points", [...points]);
+      if (from !== null) map.set("from", from);
+      if (to !== null) map.set("to", to);
       // Created now, even empty: a Y.Text two people each created later would
       // be two values for one key, and only one would survive.
       if (holdsText(shape.type)) map.set("text", new Y.Text(text));
@@ -143,8 +147,9 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
       const map = shapes.get(id);
       if (!(map instanceof Y.Map)) return;
       for (const [key, value] of Object.entries(patch)) {
-        // A whole shape passed as a patch must not replace its Y.Text with a string.
-        if (key === "text") continue;
+        // A whole shape passed as a patch must not replace its Y.Text with a
+        // string, or rewrite a stroke's points.
+        if (key === "text" || key === "points") continue;
         if (value !== undefined && map.get(key) !== value) map.set(key, value);
       }
     },

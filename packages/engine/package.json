@@ -11,6 +11,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@niro/doc": "workspace:*"
+    "@niro/doc": "workspace:*",
+    "perfect-freehand": "^1.2.3"
   }
 }
