@@ -8,6 +8,7 @@ import {
   inkColor,
   LINE_HEIGHT,
   MAX_TEXT_LENGTH,
+  MEASURE_SIZE,
   type TextLayouts,
   withHeight,
 } from "./text";
@@ -37,7 +38,8 @@ export interface TextEditorHost {
  * input methods or screen readers. A real text field gets all of those from
  * the browser. It's transparent, set in the same font, size and wrap width
  * as the canvas text, and turned and moved with the shape; the canvas skips
- * that shape's text meanwhile.
+ * that shape's text meanwhile. Like the canvas, it sets text at
+ * `MEASURE_SIZE` and scales it, so it wraps where the canvas will.
  *
  * Every keystroke goes into the document as a character edit (the textarea
  * reports its whole value; `diffText` recovers the edit), so others see the
@@ -282,19 +284,21 @@ export class TextEditor {
     const camera = this.host.camera();
     const { zoom } = camera;
     const layout = this.host.layouts.get(shape);
-    const fontPx = layout.fontSize * zoom;
+    // Screen pixels per pixel of the textarea, which is set at MEASURE_SIZE.
+    const k = (layout.fontSize * zoom) / MEASURE_SIZE;
     const ink = inkColor(shape, this.host.palette());
     const style = el.style;
-    style.fontSize = `${fontPx}px`;
-    style.width = `${layout.width * zoom}px`;
+    style.fontSize = `${MEASURE_SIZE}px`;
+    style.width = `${(layout.width * zoom) / k}px`;
     style.textAlign = layout.align;
     style.color = ink;
     style.caretColor = ink;
     // The browser wraps the textarea itself, so ask it how tall the text is.
     style.height = "0px";
-    const height = Math.max(el.scrollHeight, fontPx * LINE_HEIGHT);
-    style.height = `${height}px`;
+    const inner = Math.max(el.scrollHeight, MEASURE_SIZE * LINE_HEIGHT);
+    style.height = `${inner}px`;
     el.scrollTop = 0;
+    const height = inner * k;
 
     // Top-left of the text in the shape's frame (text shapes from their top,
     // a frame's name above it, the rest centered), turned with the shape,
@@ -311,6 +315,6 @@ export class TextEditor {
     const c = shapeCenter(shape);
     const e = (c.x - camera.x) * zoom + cos * left - sin * top;
     const f = (c.y - camera.y) * zoom + sin * left + cos * top;
-    style.transform = `matrix(${cos}, ${sin}, ${-sin}, ${cos}, ${e}, ${f})`;
+    style.transform = `matrix(${cos * k}, ${sin * k}, ${-sin * k}, ${cos * k}, ${e}, ${f})`;
   }
 }

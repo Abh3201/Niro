@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { boxFromPoints } from "./geometry";
 import { drawnExtent, drawShape, LIGHT_PALETTE } from "./render";
 import { shapeOutline } from "./shapes";
-import { layoutText } from "./text";
+import { layoutText, MEASURE_SIZE } from "./text";
 
 const measure = (s: string) => s.length * 0.5;
 
@@ -75,6 +75,68 @@ describe("drawShape", () => {
     const greeked = draw(note, 0.15);
     expect(greeked).not.toContain("fillText");
     expect(count(greeked, "fillRect")).toBeGreaterThan(1);
+  });
+});
+
+describe("drawing text", () => {
+  /** Draws `s` and returns each line as drawn: where it starts, how wide it can be, and at what size, in world units. */
+  function drawnLines(s: Shape) {
+    const lines: { left: number; maxWidth: number; size: number; fontPx: number }[] = [];
+    let scale = 1;
+    let fontPx = 0;
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_, name) => {
+          if (name === "scale") return (k: number) => (scale *= k);
+          if (name === "fillText")
+            return (_t: string, x: number, _y: number, maxWidth: number) =>
+              lines.push({
+                left: x * scale,
+                maxWidth: maxWidth * scale,
+                size: fontPx * scale,
+                fontPx,
+              });
+          return () => {};
+        },
+        set: (_, name, value) => {
+          if (name === "font") fontPx = Number.parseFloat(value);
+          return true;
+        },
+      },
+    ) as CanvasRenderingContext2D;
+    const layout = layoutText(s, measure);
+    drawShape(ctx, s, LIGHT_PALETTE, 1, { text: { layout, baseline: 0.8, zoom: 1 } });
+    return { lines, layout, scale };
+  }
+
+  it("sets text at the size it was measured at, scaled down, and puts the scale back", () => {
+    const note = shape({ type: "rectangle", x: 0, y: 0, text: "some words to wrap in a box" });
+    const { lines, layout, scale } = drawnLines(note);
+    expect(lines.length).toBe(layout.lines.length);
+    for (const line of lines) {
+      expect(line.fontPx).toBe(MEASURE_SIZE);
+      expect(line.size).toBeCloseTo(layout.fontSize);
+    }
+    expect(scale).toBeCloseTo(1);
+  });
+
+  it("never lets a line run past the shape's text box, even if the font draws it wider", () => {
+    const box = shape({
+      type: "rectangle",
+      w: 300,
+      h: 400,
+      text: "uy uy yu fuy uy yu uf uf u fu ".repeat(6),
+    });
+    const { lines, layout } = drawnLines(box);
+    const right = box.x + box.w / 2 + layout.x + layout.width;
+    for (const line of lines) expect(line.left + line.maxWidth).toBeLessThanOrEqual(right + 1e-9);
+  });
+
+  it("lets a single character wider than the shape keep its width", () => {
+    const narrow = shape({ type: "text", w: 1, text: "W" });
+    const { lines } = drawnLines(narrow);
+    expect(lines[0]?.maxWidth).toBeGreaterThan(1);
   });
 });
 
