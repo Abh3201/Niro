@@ -8,12 +8,20 @@ import {
   type Shape,
   type ShapeId,
 } from "@niro/doc";
-import { type Camera, centerOn, nextZoomStep, worldToScreen, zoomAt } from "./camera";
+import {
+  type Camera,
+  centerOn,
+  nextZoomStep,
+  screenToWorld,
+  worldToScreen,
+  zoomAt,
+} from "./camera";
 import type { Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
 import { InputController } from "./input";
 import { type EditorHost, Interaction, type ToolName } from "./interaction";
 import { Layer } from "./layers";
+import { type RemotePeer, SmoothedCursors } from "./presence";
 import { DARK_PALETTE, drawShape, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
 import { HANDLE_SIZE, placeHandles, type SelectionFrame, selectionFrame } from "./selection";
@@ -42,6 +50,12 @@ export interface EngineOptions {
   doc: DocStore;
   /** Starting camera. By default the world origin is centered at 100%. */
   camera?: Camera;
+  /**
+   * Called with the world position under the mouse or pen as it moves (or
+   * as the board moves under it), and with null when it leaves the board.
+   * For showing this user's cursor to others.
+   */
+  onPointerMove?: (world: Point | null) => void;
 }
 
 export type ReorderDirection = "forward" | "backward" | "front" | "back";
@@ -62,6 +76,8 @@ export interface Engine {
   duplicateSelection(): void;
   setSelectionColor(color: ColorName): void;
   reorderSelection(direction: ReorderDirection): void;
+  /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
+  setPeers(peers: readonly RemotePeer[]): void;
   undo(): void;
   redo(): void;
   /** Marks everything as changed; it is redrawn once, on the next animation frame. */
@@ -76,6 +92,12 @@ interface Theme {
 }
 
 const DEFAULT_GRID_DOT = "#c4c6cf";
+/** Assumed length of a frame when an animation starts from rest, in ms. */
+const FRAME_MS = 1000 / 60;
+/** A remote cursor this close to where it's heading lands on it, in CSS pixels. */
+const CURSOR_SETTLE_PX = 0.25;
+/** Longest remote name drawn on a cursor label. */
+const MAX_LABEL_CHARS = 24;
 /** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
 const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
@@ -128,6 +150,13 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   let frame: number | null = null;
   let pendingWrite: (() => void) | null = null;
   const listeners = new Set<() => void>();
+  let peers: readonly RemotePeer[] = [];
+  const cursors = new SmoothedCursors();
+  /** Timestamp of the last frame while remote cursors are moving; null at rest. */
+  let lastFrameAt: number | null = null;
+  /** The local mouse or pen, in screen coordinates, while it's over the board. */
+  let pointer: Point | null = null;
+  let reportedPointer: Point | null = null;
 
   const setState = (next: EngineState) => {
     state = next;
@@ -144,11 +173,23 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
   const markAllDirty = () => markDirty(...layers);
 
+  /** Tells `onPointerMove` where the pointer is on the board, when that changed. */
+  const reportPointer = () => {
+    if (!options.onPointerMove) return;
+    const world = pointer && screenToWorld(state.camera, pointer);
+    const last = reportedPointer;
+    if (world === last || (world && last && world.x === last.x && world.y === last.y)) return;
+    reportedPointer = world;
+    options.onPointerMove(world);
+  };
+
   const setCamera = (camera: Camera) => {
     const current = state.camera;
     if (camera.x === current.x && camera.y === current.y && camera.zoom === current.zoom) return;
     setState({ ...state, camera });
     markAllDirty();
+    // Panning or zooming moves the board under a still pointer.
+    reportPointer();
   };
 
   const selectionColorOf = (ids: readonly ShapeId[]): ColorName | null => {
@@ -211,13 +252,17 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
   const interaction = new Interaction(host);
 
-  function render() {
+  function render(now: number) {
     // Gesture writes are applied once per frame, however many pointer events
     // arrived, which bounds the edits (and tombstones) a drag produces.
     flushWrite();
     frame = null;
     const { camera, viewport } = state;
     const pr = pixelRatio;
+
+    const elapsed = lastFrameAt === null ? FRAME_MS : Math.min(now - lastFrameAt, 100);
+    const cursorsMoved = cursors.step(elapsed, CURSOR_SETTLE_PX / camera.zoom);
+    if (cursorsMoved) overlay.dirty = true;
 
     if (background.dirty) {
       background.ctx.setTransform(pr, 0, 0, pr, 0, 0);
@@ -243,9 +288,20 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       drawOverlay(ctx);
       overlay.dirty = false;
     }
+
+    // Keep drawing frames while remote cursors glide; stop once they've landed.
+    if (cursorsMoved) {
+      lastFrameAt = now;
+      schedule();
+    } else {
+      lastFrameAt = null;
+    }
   }
 
-  /** Selection, hover and marquee, drawn in screen space so lines stay crisp at any zoom. */
+  /**
+   * Selection, hover, marquee and other people's cursors and selections,
+   * drawn in screen space so lines stay crisp at any zoom.
+   */
   function drawOverlay(ctx: CanvasRenderingContext2D) {
     const { camera } = state;
     const { accent, handleFill } = theme.palette;
@@ -278,9 +334,18 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       );
       ctx.stroke();
     };
-    ctx.strokeStyle = accent;
     ctx.lineWidth = 1.5;
 
+    // Other people's selections go under ours.
+    for (const peer of peers) {
+      ctx.strokeStyle = peer.color;
+      for (const id of peer.selection) {
+        const shape = scene.get(id);
+        if (shape) outlineShape(shape);
+      }
+    }
+
+    ctx.strokeStyle = accent;
     const hovered = interaction.hovered();
     const hoveredShape =
       hovered && !state.selection.includes(hovered) ? scene.get(hovered) : undefined;
@@ -329,6 +394,12 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       ctx.globalAlpha = 1;
       ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     }
+
+    // Their cursors go over everything.
+    for (const peer of peers) {
+      const at = cursors.position(peer.id);
+      if (at) drawCursor(ctx, toScreen(at), peer);
+    }
   }
 
   const resize = () => {
@@ -369,6 +440,17 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     doc.checkpoint();
     doc.transact(fn);
     doc.checkpoint();
+  };
+
+  const setPeers = (next: readonly RemotePeer[]) => {
+    peers = next;
+    cursors.retarget(next);
+    markDirty(overlay);
+  };
+
+  const pointerMoved = (screen: Point | null) => {
+    pointer = screen;
+    reportPointer();
   };
 
   const deleteSelection = () => {
@@ -535,6 +617,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     toolCancel: () => interaction.cancel(),
     keyDown,
     toolCursor: () => interaction.cursor(),
+    pointerMoved,
   });
 
   return {
@@ -554,6 +637,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     duplicateSelection,
     setSelectionColor,
     reorderSelection,
+    setPeers,
     undo,
     redo,
     invalidate: markAllDirty,
@@ -569,6 +653,47 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       listeners.clear();
     },
   };
+}
+
+/** An arrow pointer, tip at the origin, in CSS pixels. */
+const POINTER_ARROW: readonly [number, number][] = [
+  [0, 0],
+  [0, 17],
+  [4.6, 12.9],
+  [7.6, 19.6],
+  [10.6, 18.3],
+  [7.7, 11.8],
+  [13.6, 11.8],
+];
+
+/** Someone else's pointer, with their name beside it. */
+function drawCursor(ctx: CanvasRenderingContext2D, at: Point, peer: RemotePeer): void {
+  ctx.save();
+  ctx.translate(Math.round(at.x), Math.round(at.y));
+  ctx.beginPath();
+  for (const [x, y] of POINTER_ARROW) ctx.lineTo(x, y);
+  ctx.closePath();
+  ctx.fillStyle = peer.color;
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  const name =
+    peer.name.length > MAX_LABEL_CHARS ? `${peer.name.slice(0, MAX_LABEL_CHARS - 1)}…` : peer.name;
+  if (name) {
+    ctx.font = "500 12px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    const width = ctx.measureText(name).width + 12;
+    ctx.beginPath();
+    ctx.roundRect(12, 18, width, 20, 6);
+    ctx.fillStyle = peer.color;
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(name, 18, 28);
+  }
+  ctx.restore();
 }
 
 function readTheme(container: HTMLElement, dark: boolean): Theme {

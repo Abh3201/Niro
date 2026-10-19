@@ -1,4 +1,5 @@
-# Self-host Niro: `docker compose up --build`, then open http://localhost:3000
+# Self-host Niro: put NIRO_SECRET in .env (see .env.example), run
+# `docker compose up --build`, then open http://localhost:3000
 name: niro
 
 services:
@@ -6,6 +7,9 @@ services:
     build:
       context: .
       target: web
+    environment:
+      NIRO_SECRET: ${NIRO_SECRET:?Set NIRO_SECRET in .env first. Make one with openssl rand -hex 32}
+      PUBLIC_REALTIME_URL: ${PUBLIC_REALTIME_URL:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
@@ -17,6 +21,7 @@ services:
       context: .
       target: realtime
     environment:
+      NIRO_SECRET: ${NIRO_SECRET:?Set NIRO_SECRET in .env first. Make one with openssl rand -hex 32}
       # Not used until persistence lands in P3b; wired now so the services stay stable.
       DATABASE_URL: postgres://niro:${POSTGRES_PASSWORD:-niro}@postgres:5432/niro
     ports:

@@ -28,6 +28,8 @@ const MIGRATIONS: Record<number, (shapes: Y.Map<YShape>) => void> = {};
 export interface YDocStoreOptions {
   /** Edits closer together than this merge into one undo step. Default 500 ms. */
   captureTimeout?: number;
+  /** View only: edits, undo and redo are ignored, and nothing is ever written. */
+  readOnly?: boolean;
 }
 
 export interface YDocStore extends DocStore {
@@ -35,19 +37,24 @@ export interface YDocStore extends DocStore {
 }
 
 /**
- * Wraps `doc` in a `DocStore`. Create it after the doc has loaded its stored
- * state (IndexedDB, then the server), because it migrates whatever is
- * there: migrating an empty doc that hasn't loaded yet would write a schema
- * version that then races with the real one.
+ * Wraps `doc` in a `DocStore`. Create it after the doc has loaded what it
+ * can (IndexedDB, then the server), because it migrates whatever is there.
+ *
+ * An empty doc is never stamped with a schema version on open, only with its
+ * first edit: a client that opened a board before the server's copy arrived
+ * would otherwise write its own version concurrently with the stored one,
+ * and the older number could win.
  */
 export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDocStore {
   const shapes = doc.getMap<YShape>("shapes");
   const meta = doc.getMap<unknown>("meta");
-  migrate(doc, shapes, meta);
+  if (!options.readOnly) migrate(doc, shapes, meta);
 
   const isReadOnly = () => {
+    if (options.readOnly) return true;
     const version = meta.get("schemaVersion");
-    return typeof version !== "number" || version > SCHEMA_VERSION;
+    // No version yet: a new board, which the first edit stamps.
+    return version !== undefined && (typeof version !== "number" || version > SCHEMA_VERSION);
   };
 
   const undoManager = new Y.UndoManager(shapes, {
@@ -130,7 +137,10 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
     all: () => cache.values(),
     transact(fn) {
       if (isReadOnly()) return;
-      doc.transact(() => fn(tx), LOCAL_ORIGIN);
+      doc.transact(() => {
+        if (!meta.has("schemaVersion")) meta.set("schemaVersion", SCHEMA_VERSION);
+        fn(tx);
+      }, LOCAL_ORIGIN);
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -156,11 +166,10 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
 
 function migrate(doc: Y.Doc, shapes: Y.Map<YShape>, meta: Y.Map<unknown>): void {
   const stored = meta.get("schemaVersion");
-  // A newer or unreadable version: leave the board alone; the store is read-only.
-  if (stored !== undefined && (typeof stored !== "number" || stored >= SCHEMA_VERSION)) return;
-  // Boards from before versioning existed don't exist, so a missing version
-  // means a new board.
-  let version = stored ?? SCHEMA_VERSION;
+  // No version: a new board, stamped by its first edit. A newer or unreadable
+  // version: leave the board alone; the store is read-only.
+  if (typeof stored !== "number" || stored >= SCHEMA_VERSION) return;
+  let version = stored;
   doc.transact(() => {
     for (; version < SCHEMA_VERSION; version++) MIGRATIONS[version]?.(shapes);
     meta.set("schemaVersion", SCHEMA_VERSION);

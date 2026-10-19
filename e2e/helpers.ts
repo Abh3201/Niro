@@ -12,12 +12,26 @@ export interface At {
 }
 
 export function shapesLayer(page: Page): Locator {
-  return page.locator('[data-testid="board"] canvas[data-layer="shapes"]');
+  return layer(page, "shapes");
+}
+
+function layer(page: Page, name: "shapes" | "overlay"): Locator {
+  return page.locator(`[data-testid="board"] canvas[data-layer="${name}"]`);
 }
 
 /** RGBA of the shapes layer at a point given in CSS pixels. */
 export function pixelAt(page: Page, x: number, y: number): Promise<number[]> {
-  return shapesLayer(page).evaluate(
+  return layerPixelAt(page, "shapes", x, y);
+}
+
+/** RGBA of one canvas layer at a point given in CSS pixels. */
+export function layerPixelAt(
+  page: Page,
+  name: "shapes" | "overlay",
+  x: number,
+  y: number,
+): Promise<number[]> {
+  return layer(page, name).evaluate(
     (el: HTMLCanvasElement, [cssX, cssY]) => {
       const ctx = el.getContext("2d");
       if (!ctx) throw new Error("no 2d context");
@@ -35,11 +49,17 @@ export async function expectPixel(page: Page, x: number, y: number, rgba: number
   await expect.poll(() => pixelAt(page, x, y)).toEqual(rgba);
 }
 
-/** Opens a new, empty board and waits until the engine is running. */
+/** Opens a new, empty board as its editor and waits until it's running and live. */
 export async function openBoard(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/b\/[A-Za-z0-9_-]+$/);
+  await expect(page).toHaveURL(/\/b\/[A-Za-z0-9_-]+#k=e\.[A-Za-z0-9_-]{22}$/);
+  await waitUntilLive(page);
+}
+
+/** Waits until the engine is running and connected to the realtime server. */
+export async function waitUntilLive(page: Page): Promise<void> {
   await expect(page.getByTestId("board")).toHaveAttribute("data-ready", "true");
+  await expect(page.getByTestId("sync-status")).toHaveText("Live");
 }
 
 export async function drag(page: Page, from: At, to: At, steps = 8): Promise<void> {
