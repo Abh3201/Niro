@@ -15,6 +15,7 @@ The first release: a whiteboard you can run yourself and share by link.
 - Groups, and frames that hold and clip their contents.
 - Pan and zoom with a mouse, a trackpad or touch.
 - Export the selection or the whole board as PNG or SVG.
+- Light and dark boards: they follow the system theme, or switch with the button next to the zoom controls. Each browser remembers its own choice.
 - Keyboard: Tab steps through shapes in reading order, `?` lists every shortcut. Screen readers announce the selected shape and can read a list of the board's shapes.
 - Boards of 10,000 shapes stay smooth: only what's on screen is drawn, with less detail when zoomed out.
 
