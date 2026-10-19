@@ -1,5 +1,5 @@
 import { type Camera, panBy, screenToWorld, wheelZoomFactor, zoomAt } from "./camera";
-import type { Point, Viewport } from "./geometry";
+import { distance, type Point, type Viewport } from "./geometry";
 import { pinchCamera } from "./gestures";
 import type { ToolPointer } from "./interaction";
 
@@ -21,6 +21,8 @@ export interface InputHost {
   toolHover(pointer: ToolPointer): void;
   /** A second finger, a lost pointer or a lost window focus interrupted the tool. */
   toolCancel(): void;
+  /** A double click or double tap with the primary button. */
+  doubleClick(pointer: ToolPointer): void;
   /** Editing shortcuts. Returns true when the key was handled. */
   keyDown(event: KeyboardEvent): boolean;
   /** Cursor the active tool wants when no pan is happening. */
@@ -28,6 +30,12 @@ export interface InputHost {
   /** A mouse or pen moved over the board (`screen`), or left it (null). Touch has no cursor. */
   pointerMoved(screen: Point | null): void;
 }
+
+/** A touch that moves less than this, in CSS pixels, is a tap. */
+const TAP_SLOP = 10;
+/** Two taps this close in time (ms) and space (CSS pixels) are a double tap. */
+const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_SLOP = 24;
 
 /** Safari's non-standard trackpad pinch event. */
 interface GestureEvent extends UIEvent {
@@ -55,6 +63,12 @@ export class InputController {
   private gestureStartZoom: number | null = null;
   private spaceDown = false;
   private lastPointer: Point | null = null;
+  /** A lone finger that may turn out to be a tap. */
+  private touchStart: { pointerId: number; point: Point } | null = null;
+  /** The last tap, to spot a second one. */
+  private lastTap: { at: number; point: Point } | null = null;
+  /** When a double tap was handled: the browser may report it again as a `dblclick`. */
+  private doubleTappedAt = Number.NEGATIVE_INFINITY;
   private readonly cleanup: Array<() => void> = [];
 
   constructor(private readonly host: InputHost) {
@@ -64,6 +78,7 @@ export class InputController {
     this.listen(el, "pointerup", this.onPointerEnd);
     this.listen(el, "pointercancel", this.onPointerEnd);
     this.listen(el, "pointerleave", this.onPointerLeave);
+    this.listen(el, "dblclick", this.onDoubleClick);
     this.listen(el, "wheel", this.onWheel, { passive: false });
     this.listen(el, "gesturestart", this.onGestureStart);
     this.listen(el, "gesturechange", this.onGestureChange);
@@ -111,11 +126,16 @@ export class InputController {
   }
 
   private onPointerDown(event: PointerEvent): void {
+    // Pressing in the text editor places its cursor or selects text.
+    if (isEditable(event.target)) return;
     const point = this.local(event);
     this.pointers.set(event.pointerId, point);
     this.lastPointer = point;
 
     const touches = [...this.pointers.keys()].filter((id) => id !== event.pointerId);
+    if (event.pointerType === "touch") {
+      this.touchStart = touches.length === 0 ? { pointerId: event.pointerId, point } : null;
+    }
     if (event.pointerType === "touch" && touches.length >= 1 && touches[0] !== undefined) {
       // A second finger turns any pan or tool gesture into a pinch.
       this.pinch = [touches[0], event.pointerId];
@@ -209,6 +229,48 @@ export class InputController {
     }
     if (this.pan?.pointerId === event.pointerId) this.pan = null;
     this.updateCursor();
+
+    // After the tool has seen the second tap's release, as with `dblclick`.
+    const start = this.touchStart;
+    if (start?.pointerId === event.pointerId) {
+      this.touchStart = null;
+      if (event.type === "pointerup") this.tapped(event, start.point);
+    }
+  }
+
+  /**
+   * Spots double taps. Mobile browsers don't reliably send `dblclick` for
+   * them, and a board with `touch-action: none` has to say what a double tap is.
+   */
+  private tapped(event: PointerEvent, start: Point): void {
+    const point = this.local(event);
+    const last = this.lastTap;
+    if (distance(point, start) > TAP_SLOP) {
+      this.lastTap = null;
+    } else if (
+      last &&
+      event.timeStamp - last.at < DOUBLE_TAP_MS &&
+      distance(point, last.point) < DOUBLE_TAP_SLOP
+    ) {
+      this.lastTap = null;
+      this.doubleTappedAt = event.timeStamp;
+      this.host.doubleClick(this.toolPointerFrom(event, point));
+    } else {
+      this.lastTap = { at: event.timeStamp, point };
+    }
+  }
+
+  private onDoubleClick(event: MouseEvent): void {
+    if (event.button !== 0 || isEditable(event.target) || this.spaceDown) return;
+    if (event.timeStamp - this.doubleTappedAt < 1000) return;
+    const screen = this.local(event);
+    this.host.doubleClick({
+      pointerId: -1,
+      pointerType: "mouse",
+      screen,
+      world: screenToWorld(this.host.getCamera(), screen),
+      shiftKey: event.shiftKey,
+    });
   }
 
   private onPointerLeave(event: PointerEvent): void {
@@ -255,6 +317,8 @@ export class InputController {
 
   private onKeyDown(event: KeyboardEvent): void {
     if (isEditable(event.target)) return;
+    // Enter on a focused button presses it.
+    if (event.key === "Enter" && isButton(event.target)) return;
 
     // Space on a focused button presses it; only take it over on the board itself.
     if (event.code === "Space" && !isButton(event.target)) {

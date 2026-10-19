@@ -6,11 +6,13 @@
  * - `shapes`: Y.Map from shape id to a Y.Map of that shape's fields. One map
  *   per shape means two people changing different fields of the same shape
  *   (one moves it, one recolors it) both keep their change.
+ * - A shape's `text` is a Y.Text inside its map, created with the shape, so
+ *   two people typing in it merge character by character.
  * - `meta`: Y.Map with `schemaVersion`.
  */
 import * as Y from "yjs";
-import { readShape, SCHEMA_VERSION, type Shape, type ShapeId } from "./shape";
-import type { DocStore, Origin, ShapeChange, Tx } from "./store";
+import { holdsText, readShape, SCHEMA_VERSION, type Shape, type ShapeId } from "./shape";
+import type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
 
 /** Transaction origin for this user's edits; the undo manager tracks only these. */
 const LOCAL_ORIGIN = Symbol("niro.local");
@@ -82,14 +84,18 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
   // manager records the transaction, so listeners are called later, from
   // `afterTransactionCleanup`, when `canUndo()` is already up to date.
   const touched = new Set<string>();
+  const textEdits = new Map<string, TextEdit[]>();
   const onDeepChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>) => {
     for (const event of events) {
       if (event.target === shapes) {
         for (const key of (event as Y.YMapEvent<YShape>).keysChanged) touched.add(key);
-      } else {
-        const id = event.path[0];
-        if (typeof id === "string") touched.add(id);
+        continue;
       }
+      const id = event.path[0];
+      if (typeof id !== "string") continue;
+      touched.add(id);
+      // Read now: a Yjs event's delta can't be worked out after its handlers return.
+      if (event.target instanceof Y.Text) textEdits.set(id, editsOf(event.delta));
     }
   };
   shapes.observeDeep(onDeepChange);
@@ -103,11 +109,18 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
       const shape = read(id);
       if (shape) cache.set(shape.id, shape);
       else cache.delete(id as ShapeId);
-      if (shape && previous) changes.push({ kind: "updated", shape, previous });
+      const edits = textEdits.get(id);
+      if (shape && previous)
+        changes.push(
+          edits
+            ? { kind: "updated", shape, previous, textEdits: edits }
+            : { kind: "updated", shape, previous },
+        );
       else if (shape) changes.push({ kind: "added", shape });
       else if (previous) changes.push({ kind: "removed", previous });
     }
     touched.clear();
+    textEdits.clear();
     if (changes.length === 0) return;
     const o = transaction.origin;
     const origin: Origin =
@@ -118,20 +131,42 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
 
   const tx: Tx = {
     add(shape) {
-      const { id, ...fields } = shape;
+      const { id, text, ...fields } = shape;
       const map = new Y.Map<unknown>();
       for (const [key, value] of Object.entries(fields)) map.set(key, value);
+      // Created now, even empty: a Y.Text two people each created later would
+      // be two values for one key, and only one would survive.
+      if (holdsText(shape.type)) map.set("text", new Y.Text(text));
       shapes.set(id, map);
     },
     update(id, patch) {
       const map = shapes.get(id);
       if (!(map instanceof Y.Map)) return;
       for (const [key, value] of Object.entries(patch)) {
+        // A whole shape passed as a patch must not replace its Y.Text with a string.
+        if (key === "text") continue;
         if (value !== undefined && map.get(key) !== value) map.set(key, value);
       }
     },
     remove(id) {
       shapes.delete(id);
+    },
+    editText(id, index, deleteCount, insert) {
+      const map = shapes.get(id);
+      const shape = cache.get(id);
+      if (!(map instanceof Y.Map) || !shape || !holdsText(shape.type)) return;
+      let text = map.get("text");
+      if (!(text instanceof Y.Text)) {
+        // A shape from before text existed (schema 1). Two people starting to
+        // type in it at the same moment would race here; new shapes can't.
+        text = new Y.Text(typeof text === "string" ? text : "");
+        map.set("text", text);
+      }
+      const ytext = text as Y.Text;
+      const at = Math.max(0, Math.min(Math.trunc(index), ytext.length));
+      const remove = Math.max(0, Math.min(Math.trunc(deleteCount), ytext.length - at));
+      if (remove > 0) ytext.delete(at, remove);
+      if (insert.length > 0) ytext.insert(at, insert);
     },
   };
 
@@ -207,4 +242,19 @@ function migrate(doc: Y.Doc, shapes: Y.Map<YShape>, meta: Y.Map<unknown>): void 
     for (; version < SCHEMA_VERSION; version++) MIGRATIONS[version]?.(shapes);
     meta.set("schemaVersion", SCHEMA_VERSION);
   }, MIGRATION_ORIGIN);
+}
+
+/** A Y.Text change (retain, insert, delete, in order) as edits at positions. */
+function editsOf(delta: Y.YEvent<Y.Text>["delta"]): TextEdit[] {
+  const edits: TextEdit[] = [];
+  let at = 0;
+  for (const op of delta) {
+    if (op.retain !== undefined) at += op.retain;
+    else if (op.delete !== undefined) edits.push({ index: at, deleteCount: op.delete, insert: "" });
+    else if (typeof op.insert === "string") {
+      edits.push({ index: at, deleteCount: 0, insert: op.insert });
+      at += op.insert.length;
+    }
+  }
+  return edits;
 }

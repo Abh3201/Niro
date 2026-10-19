@@ -15,6 +15,7 @@ const shape = (patch: Partial<Shape>): Shape => ({
   parentId: null,
   index: "a0",
   color: "blue",
+  text: "",
   ...patch,
 });
 

@@ -44,6 +44,37 @@ export function layerPixelAt(
   );
 }
 
+/**
+ * How many pixels of the shapes layer inside a box (CSS pixels) look like
+ * ink: dark ones ("dark"), or any drawn at all ("drawn", for text on the bare board).
+ */
+export function inkPixels(
+  page: Page,
+  box: { x: number; y: number; width: number; height: number },
+  kind: "dark" | "drawn" = "dark",
+): Promise<number> {
+  return layer(page, "shapes").evaluate(
+    (el: HTMLCanvasElement, [b, k]) => {
+      const ctx = el.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      const ratio = el.width / el.clientWidth;
+      const { data } = ctx.getImageData(
+        Math.round(b.x * ratio),
+        Math.round(b.y * ratio),
+        Math.round(b.width * ratio),
+        Math.round(b.height * ratio),
+      );
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const [r, g, bl, a] = [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0, data[i + 3] ?? 0];
+        if (k === "drawn" ? a > 100 : a > 200 && r + g + bl < 300) count++;
+      }
+      return count;
+    },
+    [box, kind] as const,
+  );
+}
+
 /** Waits until the pixel at (x, y) has the given color. */
 export async function expectPixel(page: Page, x: number, y: number, rgba: number[]) {
   await expect.poll(() => pixelAt(page, x, y)).toEqual(rgba);

@@ -8,6 +8,7 @@ import {
   RedoIcon,
   SelectIcon,
   StickyIcon,
+  TextIcon,
   UndoIcon,
 } from "./icons";
 import { useEngineState } from "./useEngineState";
@@ -16,6 +17,7 @@ const TOOLS: ReadonlyArray<{ tool: ToolName; label: string; key: string; icon: R
   { tool: "select", label: "Select", key: "V", icon: <SelectIcon /> },
   { tool: "hand", label: "Hand", key: "H", icon: <HandIcon /> },
   { tool: "sticky", label: "Sticky note", key: "N", icon: <StickyIcon /> },
+  { tool: "text", label: "Text", key: "T", icon: <TextIcon /> },
   { tool: "rectangle", label: "Rectangle", key: "R", icon: <RectangleIcon /> },
   { tool: "ellipse", label: "Ellipse", key: "O", icon: <EllipseIcon /> },
   { tool: "line", label: "Line", key: "L", icon: <LineIcon /> },

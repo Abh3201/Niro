@@ -13,6 +13,7 @@ const shape = (id: string, index: string, x = 0): Shape => ({
   parentId: null,
   index,
   color: "blue",
+  text: "",
 });
 
 const empty = { all: () => [] } as unknown as DocStore;

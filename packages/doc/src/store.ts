@@ -3,9 +3,27 @@ import type { Shape, ShapeId, ShapePatch } from "./shape";
 /** Who made a change: this user (including their undo and redo), or a collaborator. */
 export type Origin = "local" | "remote";
 
+/** Replace `deleteCount` characters at `index` with `insert`. */
+export interface TextEdit {
+  readonly index: number;
+  readonly deleteCount: number;
+  readonly insert: string;
+}
+
 export type ShapeChange =
   | { readonly kind: "added"; readonly shape: Shape }
-  | { readonly kind: "updated"; readonly shape: Shape; readonly previous: Shape }
+  | {
+      readonly kind: "updated";
+      readonly shape: Shape;
+      readonly previous: Shape;
+      /**
+       * How the text changed, when it did and the store can tell: edits in
+       * order, each at a position in the text as the ones before it left it.
+       * An editor uses them to keep its cursor on the same characters, which
+       * comparing old and new text can only guess at ("aa" to "aaa").
+       */
+      readonly textEdits?: readonly TextEdit[];
+    }
   | { readonly kind: "removed"; readonly previous: Shape };
 
 /** Mutations allowed inside `DocStore.transact`. */
@@ -13,6 +31,13 @@ export interface Tx {
   add(shape: Shape): void;
   /** Writes only the fields whose value differs, so unchanged fields cost nothing. */
   update(id: ShapeId, patch: ShapePatch): void;
+  /**
+   * Replaces `deleteCount` characters of the shape's text at `index` with
+   * `insert`, as an edit to the characters rather than a new value: someone
+   * typing elsewhere in the same text keeps their characters. Out-of-range
+   * positions are clamped.
+   */
+  editText(id: ShapeId, index: number, deleteCount: number, insert: string): void;
   remove(id: ShapeId): void;
 }
 

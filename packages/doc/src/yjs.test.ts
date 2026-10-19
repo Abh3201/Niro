@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { SCHEMA_VERSION, type Shape, type ShapeId } from "./shape";
+import { SCHEMA_VERSION, type Shape, type ShapeId, type ShapePatch } from "./shape";
 import type { Origin, ShapeChange } from "./store";
 import { countShapes, createYDocStore } from "./yjs";
 
@@ -17,6 +17,7 @@ const rect = (shapeId: string, patch: Partial<Shape> = {}): Shape => ({
   parentId: null,
   index: "a0",
   color: "blue",
+  text: "",
   ...patch,
 });
 
@@ -241,6 +242,127 @@ describe("YDocStore", () => {
     store.transact((tx) => tx.add(rect("s1")));
     expect(store.get(id("s1"))).toBeDefined();
     expect(calls).toEqual([0, 0, 1]);
+  });
+
+  it("keeps everyone's characters when two people type in one shape at once", () => {
+    const a = new Y.Doc();
+    const b = new Y.Doc();
+    const storeA = createYDocStore(a);
+    const storeB = createYDocStore(b);
+    storeA.transact((tx) => tx.add(rect("s1", { type: "sticky", text: "hello" })));
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    // Offline from each other: both type at the end, one also at the start.
+    storeA.transact((tx) => tx.editText(id("s1"), 5, 0, " world"));
+    storeB.transact((tx) => {
+      tx.editText(id("s1"), 5, 0, "!!");
+      tx.editText(id("s1"), 0, 0, ">");
+    });
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const text = storeA.get(id("s1"))?.text ?? "";
+    expect(storeB.get(id("s1"))?.text).toBe(text);
+    expect(text).toMatch(/^>hello( world!!|!! world)$/);
+  });
+
+  it("edits text by position, clamping positions past the end", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    store.transact((tx) => tx.add(rect("s1", { text: "abcdef" })));
+    store.transact((tx) => tx.editText(id("s1"), 1, 2, "XY"));
+    expect(store.get(id("s1"))?.text).toBe("aXYdef");
+    store.transact((tx) => tx.editText(id("s1"), 99, 5, "!"));
+    expect(store.get(id("s1"))?.text).toBe("aXYdef!");
+    store.transact((tx) => tx.editText(id("s1"), -3, 1, ""));
+    expect(store.get(id("s1"))?.text).toBe("XYdef!");
+  });
+
+  it("tells listeners about text edits, and undoes typing in steps", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc, { captureTimeout: 10_000 });
+    store.transact((tx) => tx.add(rect("s1", { type: "sticky" })));
+    store.checkpoint();
+    const texts: string[] = [];
+    store.subscribe((changes) => {
+      for (const change of changes) if (change.kind === "updated") texts.push(change.shape.text);
+    });
+    for (const char of "hi") store.transact((tx) => tx.editText(id("s1"), 9, 0, char));
+    expect(texts).toEqual(["h", "hi"]);
+
+    store.undo();
+    expect(store.get(id("s1"))?.text).toBe("");
+    expect(store.get(id("s1"))).toBeDefined();
+  });
+
+  it("says exactly where text changed, local or remote", () => {
+    const a = new Y.Doc();
+    const b = new Y.Doc();
+    const storeA = createYDocStore(a);
+    const storeB = createYDocStore(b);
+    storeA.transact((tx) => tx.add(rect("s1", { type: "sticky", text: "aa" })));
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const seen: ShapeChange[] = [];
+    storeA.subscribe((changes) => seen.push(...changes));
+    // B adds an "a" at the start; A can't tell that from the text alone.
+    storeB.transact((tx) => tx.editText(id("s1"), 0, 0, "a"));
+    storeB.transact((tx) => tx.editText(id("s1"), 1, 2, "b"));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+
+    expect(seen).toHaveLength(1);
+    const change = seen[0];
+    if (change?.kind !== "updated") throw new Error("expected an update");
+    expect(change.previous.text).toBe("aa");
+    expect(change.shape.text).toBe("ab");
+    // One remote update holding both edits, in order: insert "a" at 0, then
+    // replace the last two characters with "b".
+    let text = change.previous.text;
+    for (const edit of change.textEdits ?? []) {
+      text = text.slice(0, edit.index) + edit.insert + text.slice(edit.index + edit.deleteCount);
+    }
+    expect(text).toBe("ab");
+    expect(change.textEdits?.[0]).toMatchObject({ index: 0 });
+  });
+
+  it("never lets an update replace a shape's text", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    store.transact((tx) => tx.add(rect("s1", { type: "sticky", text: "kept" })));
+    // A whole shape used as a patch, as restoring a cancelled drag might.
+    const patch = { ...rect("s1", { x: 5 }), text: "lost" } as unknown as ShapePatch;
+    store.transact((tx) => tx.update(id("s1"), patch));
+    expect(store.get(id("s1"))).toMatchObject({ x: 5, text: "kept" });
+    expect(doc.getMap<Y.Map<unknown>>("shapes").get("s1")?.get("text")).toBeInstanceOf(Y.Text);
+  });
+
+  it("stores no text on lines", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    store.transact((tx) => tx.add(rect("l1", { type: "line", text: "nope" })));
+    store.transact((tx) => tx.editText(id("l1"), 0, 0, "still no"));
+    expect(store.get(id("l1"))?.text).toBe("");
+    expect(doc.getMap<Y.Map<unknown>>("shapes").get("l1")?.has("text")).toBe(false);
+  });
+
+  it("upgrades a board from before text to the current version, so older Niros stop editing it", () => {
+    const doc = new Y.Doc();
+    doc.getMap("meta").set("schemaVersion", 1);
+    const store = createYDocStore(doc);
+    expect(doc.getMap("meta").get("schemaVersion")).toBe(SCHEMA_VERSION);
+    expect(SCHEMA_VERSION).toBeGreaterThan(1);
+    expect(store.readOnly).toBe(false);
+  });
+
+  it("gives a shape from before text existed its text on the first edit", () => {
+    const doc = new Y.Doc();
+    const old = new Y.Map<unknown>();
+    for (const [key, value] of Object.entries(rect("s1")))
+      if (key !== "id" && key !== "text") old.set(key, value);
+    doc.getMap("shapes").set("s1", old);
+    const store = createYDocStore(doc);
+    store.transact((tx) => tx.editText(id("s1"), 0, 0, "new"));
+    expect(store.get(id("s1"))?.text).toBe("new");
   });
 
   it("loads shapes that were already in the doc", () => {
