@@ -101,3 +101,34 @@ test("a link with a made-up key gets no access", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("doesn't give access");
   await expect(page.getByTestId("tool-rectangle")).toHaveCount(0);
 });
+
+test("a full board turns read-only for everyone, and says why", async ({ browser }) => {
+  const alice = await person(browser);
+  const bob = await person(browser);
+  await openBoard(alice.page);
+  await join(bob.page, alice.page.url());
+
+  // The e2e server allows 8 shapes a board: draw one, then double it three times.
+  await drawRectangle(alice.page, { x: 100, y: 100 }, { x: 160, y: 160 });
+  for (const count of [2, 4, 8]) {
+    await alice.page.keyboard.press("ControlOrMeta+a");
+    await alice.page.keyboard.press("ControlOrMeta+d");
+    await expectStatus(bob.page, count, 0);
+  }
+
+  for (const { page } of [alice, bob]) {
+    await expect(page.getByText("This board has reached its size limit")).toBeVisible();
+    await expect(page.getByTestId("tool-rectangle")).toHaveCount(0);
+  }
+  // Nothing more gets in, by shortcut or by drawing.
+  await alice.page.keyboard.press("ControlOrMeta+a");
+  await alice.page.keyboard.press("ControlOrMeta+d");
+  await bob.page.keyboard.press("r");
+  await drag(bob.page, { x: 600, y: 300 }, { x: 700, y: 400 });
+  await alice.page.waitForTimeout(300);
+  await expectStatus(alice.page, 8, 8);
+  await expectStatus(bob.page, 8, 0);
+
+  await alice.context.close();
+  await bob.context.close();
+});

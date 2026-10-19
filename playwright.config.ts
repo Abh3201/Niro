@@ -21,7 +21,13 @@ export default defineConfig({
     {
       command: "pnpm --filter @niro/realtime start",
       url: `http://127.0.0.1:${realtimePort}/healthz`,
-      env: { PORT: String(realtimePort), HOST: "127.0.0.1", NIRO_SECRET: secret },
+      env: {
+        PORT: String(realtimePort),
+        HOST: "127.0.0.1",
+        NIRO_SECRET: secret,
+        // Low, so a test can fill a board. No other test uses more than a few shapes.
+        NIRO_MAX_SHAPES: "8",
+      },
       reuseExistingServer: !process.env.CI,
     },
     {

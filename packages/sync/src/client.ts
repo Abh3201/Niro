@@ -68,6 +68,9 @@ export class SyncClient {
   private heardSinceBeat = true;
   private silentBeats = 0;
   private destroyed = false;
+  private readOnlyReason: string | null = null;
+  /** The current connection said the room is read-only. */
+  private toldReadOnly = false;
   private readonly listeners = new Set<(status: SyncStatus) => void>();
   private readonly schedule: (delayMs: number, fn: () => void) => () => void;
   private readonly random: () => number;
@@ -86,7 +89,15 @@ export class SyncClient {
     return this.currentStatus;
   }
 
-  /** Calls `listener` on every status change. Returns an unsubscribe function. */
+  /**
+   * Why the room takes no more changes (it's full, say), or null while it
+   * does. Edits made meanwhile stay in this copy only.
+   */
+  get readOnly(): string | null {
+    return this.readOnlyReason;
+  }
+
+  /** Calls `listener` on every change of `status` or `readOnly`. Returns an unsubscribe function. */
   subscribe(listener: (status: SyncStatus) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -120,7 +131,17 @@ export class SyncClient {
   private setStatus(status: SyncStatus): void {
     if (status === this.currentStatus) return;
     this.currentStatus = status;
-    for (const listener of this.listeners) listener(status);
+    this.notify();
+  }
+
+  private setReadOnly(reason: string | null): void {
+    if (reason === this.readOnlyReason) return;
+    this.readOnlyReason = reason;
+    this.notify();
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener(this.currentStatus);
   }
 
   private connect(): void {
@@ -157,6 +178,7 @@ export class SyncClient {
     socket.onopen = () => {
       if (this.socket !== socket) return;
       this.open = true;
+      this.toldReadOnly = false;
       socket.send(syncStep1(this.options.doc));
       // Re-announce our presence with a new clock. Peers that saw us leave
       // kept our old clock, and ignore a state that isn't newer than it.
@@ -238,10 +260,15 @@ export class SyncClient {
       // The room's answer to our step 1: we have everything it had.
       if (syncType === sync.messageYjsSyncStep2) {
         this.attempt = 0;
+        // A read-only room says so before step 1, so silence means it isn't.
+        if (!this.toldReadOnly) this.setReadOnly(null);
         this.setStatus("online");
       }
     } else if (type === MessageType.Awareness) {
       applyAwarenessUpdate(this.options.awareness, decoding.readVarUint8Array(decoder), this);
+    } else if (type === MessageType.ReadOnly) {
+      this.toldReadOnly = true;
+      this.setReadOnly(decoding.readVarString(decoder));
     }
   }
 

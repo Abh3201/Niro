@@ -22,9 +22,10 @@ export interface Tx {
  */
 export interface DocStore {
   /**
-   * True when the board was written by a newer version of Niro. It is shown
-   * but can't be edited, so this version can't damage data it doesn't
-   * understand. `transact` does nothing.
+   * True when this user can't edit the board: they have a view link, the
+   * board is full, or it was written by a newer version of Niro (shown but
+   * not edited, so this version can't damage data it doesn't understand).
+   * `transact` does nothing.
    */
   readonly readOnly: boolean;
   get(id: ShapeId): Shape | undefined;
@@ -35,7 +36,10 @@ export interface DocStore {
    * collaborators receive one update.
    */
   transact(fn: (tx: Tx) => void): void;
-  /** Called after every transaction, local or remote, that changed a shape. */
+  /**
+   * Called after every transaction, local or remote, that changed a shape,
+   * and with no changes when `readOnly` changes.
+   */
   subscribe(listener: (changes: readonly ShapeChange[], origin: Origin) => void): () => void;
   /**
    * Ends the current undo step. Changes made within a short time of each

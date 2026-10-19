@@ -96,10 +96,13 @@ function BoardStatus({ engine, board }: { engine: Engine; board: OpenBoard }) {
     board.status.get,
     () => "connecting",
   );
+  const refusal = useSyncExternalStore(board.refusal.subscribe, board.refusal.get, () => null);
 
   let notice: string | null = null;
   if (status === "denied") {
     notice = "This link doesn't give access to this board. Ask whoever shared it for a new link.";
+  } else if (refusal !== null && board.role === "edit") {
+    notice = "This board has reached its size limit, so it can't be edited any more.";
   } else if (readOnly && board.role === "edit") {
     notice = "This board was saved by a newer version of Niro, so it is read-only here.";
   } else if (!board.saved) {

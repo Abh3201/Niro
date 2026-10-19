@@ -49,6 +49,33 @@ describe("Simulation", () => {
     forever();
     expect(() => sim.runUntilIdle(1000)).toThrow(/still busy/);
   });
+
+  it("never runs an event early, even after a cancelled one", () => {
+    const sim = new Simulation(1);
+    const ran: number[] = [];
+    sim.schedule(100, () => ran.push(sim.now))();
+    sim.schedule(2000, () => ran.push(sim.now));
+    sim.advance(500);
+    expect(ran).toEqual([]);
+    expect(sim.now).toBe(500);
+    sim.advance(1500);
+    expect(ran).toEqual([2000]);
+  });
+
+  it("lets awaiting code finish between events in the async runners", async () => {
+    const sim = new Simulation(1);
+    const order: string[] = [];
+    const query = async () => {
+      const rows = await sim.later(10, () => 3);
+      order.push(`got ${rows} at ${sim.now}`);
+      // Work that continues after the await schedules more events.
+      sim.schedule(5, () => order.push(`follow-up at ${sim.now}`));
+    };
+    void query();
+    sim.schedule(12, () => order.push(`other at ${sim.now}`));
+    await sim.runUntilIdleAsync();
+    expect(order).toEqual(["got 3 at 10", "other at 12", "follow-up at 15"]);
+  });
 });
 
 describe("createRandom", () => {

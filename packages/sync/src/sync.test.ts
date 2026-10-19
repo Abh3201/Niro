@@ -1,11 +1,12 @@
 import { Simulation } from "@niro/netsim";
+import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import { describe, expect, it } from "vitest";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { AccessDenied, SyncClient } from "./client";
 import { runScenario } from "./fuzz";
-import { MessageType, syncUpdate } from "./protocol";
+import { MessageType, ReadOnlyReason, syncUpdate } from "./protocol";
 import { type Peer, type Role, Room } from "./room";
 import type { Socket } from "./socket";
 import { contentOf, presentIn, World } from "./testing";
@@ -59,6 +60,37 @@ describe("Room and SyncClient", () => {
     world.sim.runUntilIdle();
     expect(world.server.room.doc.getMap("m").toJSON()).toEqual({ x: 1, y: 2 });
     expect(contentOf(a.doc)).toBe(contentOf(world.server.room.doc));
+  });
+
+  it("says when the room goes read-only, before a newcomer is caught up, and stops taking changes", () => {
+    const world = new World(5);
+    const a = world.client("a");
+    a.doc.getMap("m").set("x", 1);
+    world.sim.runUntilIdle();
+    world.server.room.setReadOnly(ReadOnlyReason.Full);
+    world.sim.runUntilIdle();
+    expect(a.client.readOnly).toBe("full");
+
+    const b = world.client("b");
+    let readOnlyWhenOnline: string | null = null;
+    b.client.subscribe((status) => {
+      if (status === "online") readOnlyWhenOnline = b.client.readOnly;
+    });
+    world.sim.runUntilIdle();
+    expect(readOnlyWhenOnline).toBe("full");
+
+    a.doc.getMap("m").set("x", 2);
+    world.sim.runUntilIdle();
+    expect(world.server.room.doc.getMap("m").get("x")).toBe(1);
+    expect(b.doc.getMap("m").get("x")).toBe(1);
+
+    // A room that isn't read-only after a reconnect (the limit was raised) says nothing: writable again.
+    world.server.crash();
+    world.sim.advance(1000);
+    world.server.restart();
+    world.sim.runUntilIdle();
+    expect(a.client.readOnly).toBeNull();
+    expect(b.client.readOnly).toBeNull();
   });
 
   it("relays edits to viewers but refuses theirs", () => {
@@ -192,7 +224,44 @@ describe("Room", () => {
     expect(viewer.sent).toHaveLength(1);
     room.destroy();
   });
+
+  it("sends an update back to its sender too when it completes edits the room was holding", () => {
+    // Two edits by one person, the second built on the first, reach the
+    // room out of order from two connections (a browser restored the second
+    // from its own storage). The room holds the second until the first
+    // arrives; then it applies both, and the first one's sender lacks the second.
+    const { room, peers } = roomWithPeers("edit", "edit");
+    const [a, b] = peers;
+    const author = new Y.Doc();
+    const updates: Uint8Array[] = [];
+    author.on("update", (update: Uint8Array) => updates.push(update));
+    author.getText("t").insert(0, "a");
+    author.getText("t").insert(1, "b");
+    const [first, second] = updates as [Uint8Array, Uint8Array];
+
+    room.receive(a, syncUpdate(second));
+    expect(room.doc.getText("t").toString()).toBe("");
+    b.sent.length = 0;
+    room.receive(b, syncUpdate(first));
+    expect(room.doc.getText("t").toString()).toBe("ab");
+
+    const copy = new Y.Doc();
+    Y.applyUpdate(copy, first);
+    applySent(copy, b.sent);
+    expect(copy.getText("t").toString()).toBe("ab");
+    room.destroy();
+  });
 });
+
+/** Applies the document updates among `messages` to `doc`. */
+function applySent(doc: Y.Doc, messages: readonly Uint8Array[]): void {
+  for (const message of messages) {
+    const decoder = decoding.createDecoder(message);
+    if (decoding.readVarUint(decoder) !== MessageType.Sync) continue;
+    decoding.readVarUint(decoder); // step 2 or update: both carry an update
+    Y.applyUpdate(doc, decoding.readVarUint8Array(decoder));
+  }
+}
 
 /** A socket that opens and then hears nothing, like a connection to a frozen server. */
 function silentSocket(sim: Simulation) {
@@ -283,21 +352,21 @@ describe("SyncClient connection handling", () => {
 describe("Room and SyncClient fuzz", () => {
   const seeds = Number(process.env.FUZZ_SEEDS ?? 1000);
 
-  it("replays a seed exactly", () => {
-    const trace = (seed: number) => {
+  it("replays a seed exactly", async () => {
+    const trace = async (seed: number) => {
       const lines: string[] = [];
-      const result = runScenario(seed, (line) => lines.push(line));
+      const result = await runScenario(seed, (line) => lines.push(line));
       return { result, lines };
     };
-    expect(trace(7)).toEqual(trace(7));
+    expect(await trace(7)).toEqual(await trace(7));
   });
 
-  const name = `converges, loses no edit and shows the right presence, over ${seeds} random runs`;
-  it(name, { timeout: Math.max(10_000, seeds * 50) }, () => {
+  const name = `converges, loses no edit, stores everything and shows the right presence, over ${seeds} random runs`;
+  it(name, { timeout: Math.max(10_000, seeds * 50) }, async () => {
     const failures: { seed: number; violations: readonly string[] }[] = [];
     let faults = 0;
     for (let seed = 1; seed <= seeds && failures.length < 3; seed++) {
-      const result = runScenario(seed);
+      const result = await runScenario(seed);
       faults += result.faults;
       if (result.violations.length > 0) failures.push({ seed, violations: result.violations });
     }

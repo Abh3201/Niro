@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Realtime sync on Yjs: the server's Room, the browser's SyncClient, the wire protocol, and share-link tokens.",
+  "description": "Realtime sync on Yjs: the server's Room and RoomHost (loading and saving boards), the browser's SyncClient, the wire protocol, and share-link tokens.",
   "exports": {
     ".": "./src/index.ts",
     "./auth": "./src/auth.ts"
