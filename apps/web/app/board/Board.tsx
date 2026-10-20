@@ -3,9 +3,9 @@ import type { SyncStatus } from "@niro/sync";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { currentKey } from "./access";
 import { firstImage, ImageError } from "./assets";
-import { CommentControls, Comments, useCommentKey } from "./Comments";
+import { BoardMenu } from "./BoardMenu";
+import { CommentMenu, Comments, useCommentKey } from "./Comments";
 import { useClipboard } from "./clipboard";
-import { ExportControls } from "./ExportControls";
 import { HistoryPanel } from "./HistoryPanel";
 import { Minimap } from "./Minimap";
 import { type OpenBoard, openBoard } from "./open-board";
@@ -266,19 +266,27 @@ function Panels({
   if (presenting) return <PresentControls engine={engine} />;
   return (
     <>
-      <Toolbar engine={engine} onImage={onImage} />
-      <SelectionPanel engine={engine} />
-      <ZoomControls engine={engine} onHelp={onHelp} />
-      <ExportControls engine={engine} onHistory={onHistory} />
-      <Minimap engine={engine} />
-      <CommentControls
-        count={threads.filter((t) => !t.resolved).length}
-        placing={placing}
-        canComment={board.role === "edit" && !readOnly}
-        listOpen={commentsOpen}
-        onPlace={onPlace}
-        onList={onComments}
+      <Toolbar
+        engine={engine}
+        onImage={onImage}
+        comments={
+          <CommentMenu
+            count={threads.filter((t) => !t.resolved).length}
+            placing={placing}
+            canComment={board.role === "edit" && !readOnly}
+            listOpen={commentsOpen}
+            onPlace={onPlace}
+            onList={onComments}
+          />
+        }
       />
+      <SelectionPanel engine={engine} />
+      <ZoomControls
+        engine={engine}
+        onHelp={onHelp}
+        menu={<BoardMenu engine={engine} onHistory={onHistory} />}
+      />
+      <Minimap engine={engine} />
     </>
   );
 }
