@@ -1,4 +1,4 @@
-import { type ColorName, isLinear, type Shape } from "@niro/doc";
+import { type ColorName, defaultHead, isLinear, type Shape } from "@niro/doc";
 import { PEN_SIZE } from "./freehand";
 import { type Box, boxFromPoints, rotateAround, unionBoxes } from "./geometry";
 import { reactionsExtent } from "./reactions";
@@ -60,7 +60,8 @@ export const DARK_PALETTE: Palette = {
   frame: { fill: "#232329", border: "#3f3f46", label: "#a1a1aa" },
 };
 
-export const LINE_WIDTH = 4;
+import { HEAD_WIDTHS, lineWidthOf } from "./line-style";
+
 const STICKY_SHADOW = "rgba(0, 0, 0, 0.14)";
 /** Text smaller than this on screen, in CSS pixels, is drawn as bars: unreadable anyway, and much cheaper. */
 const GREEK_BELOW_PX = 4;
@@ -80,7 +81,7 @@ function shapeBoxExtent(shape: Shape, layout?: TextLayout): Box {
   const box = shapeExtent(shape);
   const pad = isLinear(shape.type)
     ? // Round caps, and an arrowhead's wings.
-      ARROWHEAD
+      lineWidthOf(shape) * HEAD_WIDTHS
     : shape.type === "freehand"
       ? // The stroke is a fixed width however the box is scaled.
         PEN_SIZE
@@ -225,34 +226,51 @@ export function drawShape(
   if (turned) ctx.restore();
 }
 
-/** Length of an arrowhead, in world units; narrower arrows get smaller heads. */
-const ARROWHEAD = LINE_WIDTH * 4;
-
-/** A line, or an arrow with a filled head at its end. */
+/** A line, or an arrow: dashed or not, with a filled head at either end or both. */
 function drawLine(ctx: CanvasRenderingContext2D, shape: Shape, color: string): void {
   const { x, y, w, h } = shape;
+  const width = lineWidthOf(shape);
   const length = Math.hypot(w, h);
-  const head = shape.type === "arrow" ? Math.min(ARROWHEAD, length * 0.5) : 0;
-  // The shaft stops inside the head, so its round cap can't poke through the tip.
-  const shaft = length > 0 ? Math.max(0, length - head * 0.6) / length : 1;
+  const heads = shape.head ?? defaultHead(shape.type);
+  const ux = length > 0 ? w / length : 0;
+  const uy = length > 0 ? h / length : 0;
+  const size = Math.min(width * HEAD_WIDTHS, length * 0.5);
+  const startHead = heads === "start" || heads === "both" ? size : 0;
+  const endHead = heads === "end" || heads === "both" ? size : 0;
+  // The shaft stops inside each head, so its round cap can't poke through the tip.
+  const from = startHead * 0.6;
+  const to = Math.max(from, length - endHead * 0.6);
   ctx.strokeStyle = color;
-  ctx.lineWidth = LINE_WIDTH;
+  ctx.lineWidth = width;
   ctx.lineCap = "round";
+  const dash = shape.dash ?? "solid";
+  // Dots are zero-length dashes, which round caps make into circles.
+  if (dash === "dashed") ctx.setLineDash([width * 3, width * 2.5]);
+  else if (dash === "dotted") ctx.setLineDash([0.01, width * 2.2]);
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + w * shaft, y + h * shaft);
+  ctx.moveTo(x + ux * from, y + uy * from);
+  ctx.lineTo(x + ux * to, y + uy * to);
   ctx.stroke();
-  if (head <= 0) return;
-  const ux = w / length;
-  const uy = h / length;
-  const tip = { x: x + w, y: y + h };
-  const back = { x: tip.x - ux * head, y: tip.y - uy * head };
-  const half = head * 0.45;
+  if (dash !== "solid") ctx.setLineDash([]);
   ctx.fillStyle = color;
+  if (endHead > 0) drawHead(ctx, { x: x + w, y: y + h }, -ux, -uy, endHead);
+  if (startHead > 0) drawHead(ctx, { x, y }, ux, uy, startHead);
+}
+
+/** A filled arrowhead with its tip at `tip`, `size` long toward `(dx, dy)`, the unit direction of the shaft. */
+function drawHead(
+  ctx: CanvasRenderingContext2D,
+  tip: { x: number; y: number },
+  dx: number,
+  dy: number,
+  size: number,
+): void {
+  const back = { x: tip.x + dx * size, y: tip.y + dy * size };
+  const half = size * 0.45;
   ctx.beginPath();
   ctx.moveTo(tip.x, tip.y);
-  ctx.lineTo(back.x - uy * half, back.y + ux * half);
-  ctx.lineTo(back.x + uy * half, back.y - ux * half);
+  ctx.lineTo(back.x - dy * half, back.y + dx * half);
+  ctx.lineTo(back.x + dy * half, back.y - dx * half);
   ctx.closePath();
   ctx.fill();
 }

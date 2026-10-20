@@ -126,6 +126,27 @@ describe("Interaction", () => {
     expect(t.doc.get(first?.id as ShapeId)).toMatchObject({ x: 100, y: 100 });
   });
 
+  it("lets a locked shape be picked but not dragged, and a drag from it is a marquee", () => {
+    const t = setup();
+    t.setTool("rectangle");
+    t.drag({ x: 100, y: 100 }, { x: 200, y: 200 });
+    t.setTool("rectangle");
+    t.drag({ x: 400, y: 100 }, { x: 500, y: 200 });
+    const [locked, other] = [...t.doc.all()] as Shape[];
+    t.doc.transact((tx) => tx.update((locked as Shape).id, { locked: true }));
+
+    // A click picks it, with no handles to resize it by.
+    t.interaction.pointerDown(t.pointer({ x: 150, y: 150 }));
+    t.interaction.pointerUp(t.pointer({ x: 150, y: 150 }));
+    expect(t.selection()).toEqual([locked?.id]);
+    expect(t.interaction.frame()).toBeNull();
+
+    // A drag starting on it moves nothing: it sweeps a marquee, which skips locked shapes.
+    t.drag({ x: 150, y: 150 }, { x: 600, y: 300 });
+    expect(t.doc.get((locked as Shape).id)).toMatchObject({ x: 100, y: 100 });
+    expect(t.selection()).toEqual([other?.id]);
+  });
+
   it("drops a default-size shape on a click", () => {
     const t = setup();
     t.setTool("sticky");

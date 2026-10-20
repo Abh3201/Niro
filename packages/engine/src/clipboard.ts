@@ -10,7 +10,7 @@ import {
 import { type Point, unionBoxes } from "./geometry";
 import type { Scene } from "./scene";
 import { shapeBounds } from "./shapes";
-import { frameFor, outermost, siblingsIn, withDescendants } from "./structure";
+import { frameFor, outermost, siblingsIn, unlocked, withDescendants } from "./structure";
 import { translate } from "./transform";
 
 /**
@@ -150,7 +150,7 @@ export function pasteShapes(
   for (const shape of kept) {
     const parent = parents.get(shape.id) ?? null;
     tx.add({
-      ...shape,
+      ...unlocked(shape),
       ...translate(shape, dx, dy),
       id: copyId.get(shape.id) as ShapeId,
       parentId: placed.get(shape.id)?.parentId ?? remap(parent as ShapeId | null),

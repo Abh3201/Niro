@@ -294,7 +294,10 @@ export class Scene {
       before.w === shape.w &&
       before.h === shape.h &&
       before.rotation === shape.rotation &&
-      before.text === shape.text
+      before.text === shape.text &&
+      // A thicker line or a head at the other end covers a different box.
+      before.thickness === shape.thickness &&
+      before.head === shape.head
     )
       return;
     this.unindexed.add(shape.id);

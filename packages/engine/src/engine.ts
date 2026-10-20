@@ -4,6 +4,9 @@ import {
   type DocStore,
   holdsText,
   isLinear,
+  type LineDash,
+  type LineHead,
+  type LineThickness,
   newShapeId,
   REACTION_NAMES,
   type ReactionName,
@@ -43,6 +46,9 @@ import { shapeBounds, shapeCenter, shapeOutline } from "./shapes";
 import {
   duplicate,
   group,
+  hasLocked,
+  isLocked,
+  type LineStyle,
   movers,
   outermost,
   placeNew,
@@ -50,6 +56,7 @@ import {
   reorder,
   reparentOnMove,
   sharedColor,
+  sharedLineStyle,
   styleTargets,
   ungroup,
   withDescendants,
@@ -78,6 +85,13 @@ export interface EngineState {
    * or null when mixed or nothing is selected.
    */
   readonly selectionColor: ColorName | null;
+  /** Something selected is locked (or in something locked), so it can't be changed until unlocked. */
+  readonly selectionLocked: boolean;
+  /**
+   * The line style the selection shares, per property (null where it
+   * differs), or null unless every selected shape is a line or an arrow.
+   */
+  readonly selectionLine: LineStyle | null;
   /** Two or more shapes are selected, so they can be grouped. */
   readonly canGroup: boolean;
   /** A group is selected, so it can be taken apart. */
@@ -178,6 +192,10 @@ export interface Engine {
   deleteSelection(): void;
   duplicateSelection(): void;
   setSelectionColor(color: ColorName): void;
+  /** Locks the selected shapes, or unlocks them when something selected is locked. */
+  toggleLock(): void;
+  /** Changes how the selected lines and arrows are drawn. Other shapes are left alone. */
+  setLineStyle(style: { dash?: LineDash; thickness?: LineThickness; head?: LineHead }): void;
   reorderSelection(direction: ReorderDirection): void;
   /** Puts the selected shapes in a group, and selects it. */
   groupSelection(): void;
@@ -333,6 +351,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     tool: "select",
     selection: [],
     selectionColor: null,
+    selectionLocked: false,
+    selectionLine: null,
     canGroup: false,
     canUngroup: false,
     shapeCount: scene.size,
@@ -447,6 +467,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   /** What the panel shows about a selection. */
   const describe = (ids: readonly ShapeId[]) => ({
     selectionColor: sharedColor(scene, ids),
+    selectionLocked: hasLocked(scene, ids),
+    selectionLine: sharedLineStyle(scene, ids),
     canGroup: outermost(scene, ids).length >= 2,
     canUngroup: ids.some((id) => scene.get(id)?.type === "group"),
     selectionLabel: ids.length === 1 ? describeShape(scene, ids[0] as ShapeId) : "",
@@ -689,7 +711,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     if (hoveredShape) outlineShape(hoveredShape);
 
     const selected = selectedShapes();
+    // A locked selection is outlined with dashes, and has no handles.
+    if (state.selectionLocked) ctx.setLineDash([6, 4]);
     for (const shape of selected) outlineShape(shape);
+    if (state.selectionLocked) ctx.setLineDash([]);
 
     const frame = interaction.frame();
     // Several shapes get a dashed box around them all; a group has its own outline.
@@ -909,7 +934,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const deleteSelection = () => {
     const ids = state.selection;
-    if (ids.length === 0) return;
+    if (ids.length === 0 || hasLocked(scene, ids)) return;
     command((tx) => remove(scene, tx, ids));
   };
 
@@ -924,14 +949,42 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   const setSelectionColor = (color: ColorName) => {
+    if (hasLocked(scene, state.selection)) return;
     const ids = styleTargets(scene, state.selection);
     command((tx) => {
       for (const id of ids) tx.update(id, { color });
     });
   };
 
+  /** Locks the selection, or unlocks it when anything in it is locked (what's locked by a locked group is unlocked through that group). */
+  const toggleLock = () => {
+    const ids = outermost(scene, state.selection);
+    if (ids.length === 0 || doc.readOnly) return;
+    // Unlocking acts on whatever is locked itself, in the selection or inside it.
+    const lockedNow = withDescendants(scene, ids).filter((id) => scene.get(id)?.locked);
+    command((tx) => {
+      if (lockedNow.length > 0) for (const id of lockedNow) tx.update(id, { locked: false });
+      else for (const id of ids) tx.update(id, { locked: true });
+    });
+  };
+
+  const setLineStyle = (style: { dash?: LineDash; thickness?: LineThickness; head?: LineHead }) => {
+    if (hasLocked(scene, state.selection)) return;
+    const ids = styleTargets(scene, state.selection).filter((id) =>
+      isLinear(scene.get(id)?.type ?? "rectangle"),
+    );
+    if (ids.length === 0) return;
+    command((tx) => {
+      for (const id of ids) {
+        const shape = scene.get(id);
+        // An arrow is drawn where it is, not where it's stored: write both ends as drawn.
+        if (shape) tx.update(id, { ...asDrawn(shape), ...style });
+      }
+    });
+  };
+
   const reorderSelection = (direction: ReorderDirection) => {
-    if (state.selection.length === 0) return;
+    if (state.selection.length === 0 || hasLocked(scene, state.selection)) return;
     const keys = reorder(scene, state.selection, direction);
     command((tx) => {
       for (const [id, index] of keys) tx.update(id, { index });
@@ -939,7 +992,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   const groupSelection = () => {
-    if (!state.canGroup || doc.readOnly) return;
+    if (!state.canGroup || doc.readOnly || state.selectionLocked) return;
     let id: ShapeId | null = null;
     command((tx) => {
       id = group(scene, tx, state.selection);
@@ -948,7 +1001,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   const ungroupSelection = () => {
-    if (!state.canUngroup || doc.readOnly) return;
+    if (!state.canUngroup || doc.readOnly || state.selectionLocked) return;
     let freed: ShapeId[] = [];
     command((tx) => {
       freed = ungroup(scene, tx, state.selection);
@@ -962,7 +1015,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const copySelection = (): Shape[] => copyShapes(scene, state.selection);
 
   const cutSelection = (): Shape[] => {
-    if (doc.readOnly) return [];
+    if (doc.readOnly || state.selectionLocked) return [];
     const copied = copySelection();
     deleteSelection();
     return copied;
@@ -1056,7 +1109,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   function editText(id: ShapeId) {
     const shape = scene.get(id);
-    if (!shape || !holdsText(shape.type) || doc.readOnly) return;
+    if (!shape || !holdsText(shape.type) || doc.readOnly || isLocked(scene, id)) return;
     interaction.cancel();
     editor.start(shape);
   }
@@ -1065,7 +1118,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     const units = outermost(scene, state.selection)
       .map((id) => scene.get(id))
       .filter((s): s is Shape => s !== undefined);
-    if (units.length === 0 || doc.readOnly) return;
+    if (units.length === 0 || doc.readOnly || state.selectionLocked) return;
     const moving = new Set(withDescendants(scene, state.selection));
     const membership = reparentOnMove(scene, units, moving, dx, dy);
     // Consecutive nudges merge into one undo step, like a drag.
@@ -1159,6 +1212,11 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       else return false;
       return true;
     }
+    // Shift + Alt + L, as in tldraw: Ctrl + L belongs to the browser.
+    if (event.altKey && event.shiftKey && event.code === "KeyL" && !mod) {
+      toggleLock();
+      return true;
+    }
     if (mod || event.altKey) return false;
 
     if (event.key === "Delete" || event.key === "Backspace") {
@@ -1201,7 +1259,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   /** Everything at the top level: what's in groups and frames comes with them. */
-  const selectAll = () => setSelection(scene.childrenOf(null));
+  const selectAll = () => setSelection(scene.childrenOf(null).filter((id) => !isLocked(scene, id)));
 
   // ResizeObserver doesn't fire when the window moves to a screen with a different
   // pixel ratio, so watch the ratio itself too.
@@ -1262,6 +1320,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     deleteSelection,
     duplicateSelection,
     setSelectionColor,
+    toggleLock,
+    setLineStyle,
     reorderSelection,
     groupSelection,
     ungroupSelection,

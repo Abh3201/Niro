@@ -22,6 +22,31 @@ describe("readShape", () => {
     expect(readShape("s1", valid)).toEqual({ id: "s1", ...valid });
   });
 
+  it("reads locks and line styles, leaving out defaults", () => {
+    expect(readShape("s1", { ...valid, locked: true })).toMatchObject({ locked: true });
+    expect(readShape("s1", { ...valid, locked: false })).not.toHaveProperty("locked");
+    expect(readShape("s1", { ...valid, locked: "yes" })).not.toHaveProperty("locked");
+    const line = { ...valid, type: "line" };
+    expect(
+      readShape("s1", { ...line, dash: "dashed", thickness: "thick", head: "both" }),
+    ).toMatchObject({
+      dash: "dashed",
+      thickness: "thick",
+      head: "both",
+    });
+    // Defaults are the same as nothing; so is anything unknown, and anything on a shape that isn't a line.
+    const plain = readShape("s1", { ...line, dash: "solid", thickness: "medium", head: "none" });
+    expect(plain).not.toHaveProperty("dash");
+    expect(plain).not.toHaveProperty("thickness");
+    expect(plain).not.toHaveProperty("head");
+    expect(readShape("s1", { ...line, dash: "wavy", head: 3 })).not.toHaveProperty("dash");
+    expect(readShape("s1", { ...valid, dash: "dashed" })).not.toHaveProperty("dash");
+    // An arrow's default head is its end; none is what has to be stored.
+    const arrow = { ...valid, type: "arrow" };
+    expect(readShape("s1", { ...arrow, head: "end" })).not.toHaveProperty("head");
+    expect(readShape("s1", { ...arrow, head: "none" })).toMatchObject({ head: "none" });
+  });
+
   it("hides shapes of a type this version doesn't know", () => {
     expect(readShape("s1", { ...valid, type: "hologram" })).toBeNull();
     expect(readShape("s1", {})).toBeNull();

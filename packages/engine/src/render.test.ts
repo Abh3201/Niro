@@ -164,3 +164,31 @@ describe("drawnExtent", () => {
     expect(extent.maxX).toBeGreaterThan(100);
   });
 });
+
+describe("lines", () => {
+  const arrow = (patch: Partial<Shape> = {}) =>
+    shape({ type: "arrow", color: "black", x: 0, y: 0, w: 200, h: 0, ...patch });
+
+  it("draws one head by default, two for both ends, none for a line", () => {
+    expect(count(draw(arrow(), 1), "fill")).toBe(1);
+    expect(count(draw(arrow({ head: "both" }), 1), "fill")).toBe(2);
+    expect(count(draw(arrow({ head: "none" }), 1), "fill")).toBe(0);
+    expect(count(draw(arrow({ type: "line" }), 1), "fill")).toBe(0);
+    expect(count(draw(arrow({ type: "line", head: "start" }), 1), "fill")).toBe(1);
+  });
+
+  it("dashes only dashed and dotted lines", () => {
+    expect(count(draw(arrow(), 1), "setLineDash")).toBe(0);
+    // Set for the stroke, and cleared after.
+    expect(count(draw(arrow({ dash: "dashed" }), 1), "setLineDash")).toBe(2);
+    expect(count(draw(arrow({ dash: "dotted" }), 1), "setLineDash")).toBe(2);
+  });
+
+  it("covers a thick line's cap and head in its extent", () => {
+    const thin = drawnExtent(arrow({ thickness: "thin" }));
+    const thick = drawnExtent(arrow({ thickness: "thick" }));
+    expect(thin.minY).toBeGreaterThan(thick.minY);
+    // An arrowhead is four widths long: the extent reaches at least that far past the line.
+    expect(thick.minY).toBeLessThanOrEqual(-8 * 4);
+  });
+});

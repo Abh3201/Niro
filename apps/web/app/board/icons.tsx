@@ -177,3 +177,49 @@ export const MoonIcon = () => (
     <path d="M16 12.2A6.5 6.5 0 017.8 4a6.5 6.5 0 108.2 8.2z" />
   </Icon>
 );
+
+export const LockIcon = () => (
+  <Icon>
+    <rect x="4.5" y="9" width="11" height="7.5" rx="1.5" />
+    <path d="M7 9V6.5a3 3 0 016 0V9" />
+  </Icon>
+);
+
+export const UnlockIcon = () => (
+  <Icon>
+    <rect x="4.5" y="9" width="11" height="7.5" rx="1.5" />
+    <path d="M7 9V6.5a3 3 0 015.6-1.5" />
+  </Icon>
+);
+
+/** A sample stroke for the line style buttons: dashed or dotted, thin or thick. */
+export const StrokeSampleIcon = ({
+  dash,
+  width = 1.6,
+}: {
+  dash?: "dashed" | "dotted" | undefined;
+  width?: number | undefined;
+}) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={width}
+    strokeLinecap={dash === "dotted" ? "round" : "butt"}
+    strokeDasharray={dash === "dashed" ? "4 3" : dash === "dotted" ? "0.1 3.6" : undefined}
+    aria-hidden="true"
+  >
+    <path d="M2 10h16" />
+  </svg>
+);
+
+/** A line with a head at one end, both, or neither. */
+export const HeadSampleIcon = ({ head }: { head: "none" | "end" | "start" | "both" }) => (
+  <Icon>
+    <path d="M4 10h12" />
+    {(head === "end" || head === "both") && <path d="M12.5 6.5L16 10l-3.5 3.5" />}
+    {(head === "start" || head === "both") && <path d="M7.5 6.5L4 10l3.5 3.5" />}
+  </Icon>
+);

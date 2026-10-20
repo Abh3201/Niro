@@ -422,7 +422,7 @@ describe("YDocStore", () => {
   });
 
   it("opens a board from a newer version read-only, whatever this version is", () => {
-    expect(SCHEMA_VERSION).toBe(5);
+    expect(SCHEMA_VERSION).toBe(6);
     const doc = new Y.Doc();
     doc.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
     expect(createYDocStore(doc).readOnly).toBe(true);
