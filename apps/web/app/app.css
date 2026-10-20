@@ -293,6 +293,10 @@ body {
   list-style: none;
 }
 
+.avatar-item {
+  display: flex;
+}
+
 .avatar {
   display: grid;
   place-items: center;
@@ -305,6 +309,31 @@ body {
   font-size: 11px;
   font-weight: 600;
   cursor: default;
+}
+
+.panel button.avatar {
+  min-width: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--panel-bg);
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel button.avatar[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.following {
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  font-size: 13px;
 }
 
 .avatar.more {

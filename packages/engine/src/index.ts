@@ -14,6 +14,7 @@ export {
   type ReorderDirection,
   type ToolName,
 } from "./engine";
+export type { View } from "./follow";
 export type { Box, Point, Viewport } from "./geometry";
 export type { ImageLoader } from "./images";
 export type { RemotePeer } from "./presence";

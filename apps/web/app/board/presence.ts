@@ -1,5 +1,5 @@
 import { USER_ID } from "@niro/doc";
-import type { Engine, Point, RemotePeer } from "@niro/engine";
+import type { Engine, Point, RemotePeer, View } from "@niro/engine";
 import type { Awareness } from "y-protocols/awareness";
 
 /** Who you are to others on a board. Kept in this browser; there are no accounts. */
@@ -136,15 +136,26 @@ function readPoint(value: unknown): Point | null {
     : null;
 }
 
+/** A view from another browser: finite numbers and a size that is more than a dot. */
+function readView(value: unknown): View | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { x, y, w, h } = value as Record<string, unknown>;
+  const ok = (n: unknown): n is number =>
+    typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e9;
+  return ok(x) && ok(y) && ok(w) && ok(h) && w > 0 && h > 0 ? { x, y, w, h } : null;
+}
+
 function readPeer(id: number, state: unknown): RemotePeer | null {
   if (typeof state !== "object" || state === null) return null;
-  const { user, cursor, selection } = state as Record<string, unknown>;
+  const { user, cursor, selection, laser, view } = state as Record<string, unknown>;
   const identity = readIdentity(user);
   if (!identity) return null;
   return {
     id,
     ...identity,
     cursor: readPoint(cursor),
+    laser: readPoint(laser),
+    view: readView(view),
     selection: Array.isArray(selection)
       ? selection.filter((s): s is RemotePeer["selection"][number] => typeof s === "string")
       : [],
@@ -163,15 +174,25 @@ export class Presence {
   private peopleSignature = "";
   private readonly listeners = new Set<() => void>();
   private engine: Engine | null = null;
-  /** The cursor waiting for the next send slot; undefined when none is. */
-  private pendingCursor: Point | null | undefined;
+  /**
+   * Changes to the cursor, laser and view waiting for the next send slot:
+   * they go out together, at most 20 times a second.
+   */
+  private pending: { cursor?: Point | null; laser?: Point | null; view?: View | null } | null =
+    null;
   private cursorTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly awareness: Awareness,
     identity: Identity,
   ) {
-    awareness.setLocalState({ user: identity, cursor: null, selection: [] });
+    awareness.setLocalState({
+      user: identity,
+      cursor: null,
+      laser: null,
+      view: null,
+      selection: [],
+    });
     awareness.on("change", this.onChange);
     this.updatePeople();
   }
@@ -195,19 +216,35 @@ export class Presence {
 
   /** For `EngineOptions.onPointerMove`: shares the cursor, at most 20 times a second. */
   readonly pointerMoved = (world: Point | null): void => {
-    this.pendingCursor = world && { x: round(world.x), y: round(world.y) };
-    if (this.cursorTimer !== null) return; // the next slot sends the latest
-    this.sendCursor();
+    this.queue({ cursor: world && { x: round(world.x), y: round(world.y) } });
   };
 
-  private sendCursor(): void {
-    if (this.pendingCursor === undefined) {
+  /** For `EngineOptions.onLaser`: shares the laser pointer's position, or (null) that it was let go. */
+  readonly laserMoved = (world: Point | null): void => {
+    this.queue({ laser: world && { x: round(world.x), y: round(world.y) } });
+  };
+
+  /** For `EngineOptions.onView`: shares the part of the board this user sees, for others to follow. */
+  readonly viewChanged = (view: View | null): void => {
+    this.queue({ view });
+  };
+
+  private queue(fields: NonNullable<Presence["pending"]>): void {
+    this.pending = { ...this.pending, ...fields };
+    if (this.cursorTimer !== null) return; // the next slot sends the latest
+    this.send();
+  }
+
+  private send(): void {
+    const fields = this.pending;
+    if (fields === null) {
       this.cursorTimer = null;
       return;
     }
-    this.awareness.setLocalStateField("cursor", this.pendingCursor);
-    this.pendingCursor = undefined;
-    this.cursorTimer = setTimeout(() => this.sendCursor(), 1000 / CURSOR_HZ);
+    this.pending = null;
+    const state = this.awareness.getLocalState();
+    if (state) this.awareness.setLocalState({ ...state, ...fields });
+    this.cursorTimer = setTimeout(() => this.send(), 1000 / CURSOR_HZ);
   }
 
   rename(name: string): void {

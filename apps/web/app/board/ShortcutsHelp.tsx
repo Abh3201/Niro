@@ -16,6 +16,7 @@ const SECTIONS: ReadonlyArray<{ title: string; rows: ReadonlyArray<[string, stri
       ["A", "Arrow"],
       ["P", "Pen"],
       ["F", "Frame"],
+      ["K", "Laser pointer (hold and drag; everyone sees the trail)"],
     ],
   },
   {

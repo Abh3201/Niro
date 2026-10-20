@@ -24,12 +24,15 @@ import {
 } from "./camera";
 import { copyShapes, pasteShapes } from "./clipboard";
 import { exportPng, exportSvg } from "./export";
+import type { View } from "./follow";
+import { easeCamera, followCamera } from "./follow";
 import { StrokePaths, strokeOutline, traceOutline } from "./freehand";
 import type { Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
 import { ImageCache, type ImageLoader } from "./images";
 import { InputController } from "./input";
 import { type EditorHost, Interaction, type ToolName } from "./interaction";
+import { LaserTrails, laserAlpha } from "./laser";
 import { Layer } from "./layers";
 import { paintShapes } from "./paint";
 import { type RemotePeer, SmoothedCursors } from "./presence";
@@ -89,6 +92,8 @@ export interface EngineState {
   readonly readOnly: boolean;
   /** The shape whose text is being edited, if any. */
   readonly editing: ShapeId | null;
+  /** The peer whose view this one is showing (`RemotePeer.id`), or null. */
+  readonly following: number | null;
   /** Words for the selected shape, for screen readers; empty unless one shape is selected. */
   readonly selectionLabel: string;
   /** Reactions on the selected shapes, added up; empty when nothing is selected. */
@@ -125,6 +130,17 @@ export interface EngineOptions {
    * rasterize them later, off the main thread.
    */
   onFrame?: (stats: FrameStats) => void;
+  /**
+   * Called with the laser pointer's position in world coordinates while this
+   * user holds it down, and with null when they let go. For showing it to others.
+   */
+  onLaser?: (world: Point | null) => void;
+  /**
+   * Called with the part of the board this user sees (world coordinates)
+   * when it changes, and with null while they're following someone else's
+   * view (two people following each other would otherwise zoom out forever).
+   */
+  onView?: (view: View | null) => void;
   /** Loads an image shape's picture from its file id. Without one, images draw as placeholders. */
   loadImage?: ImageLoader;
   /**
@@ -198,6 +214,11 @@ export interface Engine {
   editText(id: ShapeId): void;
   /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
   setPeers(peers: readonly RemotePeer[]): void;
+  /**
+   * Shows what peer `id` sees, following their view as it moves, or (null)
+   * stops. Panning or zooming yourself, or the peer leaving, stops it.
+   */
+  follow(id: number | null): void;
   undo(): void;
   redo(): void;
   /**
@@ -230,6 +251,8 @@ const FRAME_MS = 1000 / 60;
 const CURSOR_SETTLE_PX = 0.25;
 /** Longest remote name drawn on a cursor label. */
 const MAX_LABEL_CHARS = 24;
+/** Your own laser pointer. */
+const LASER_OWN = "#ef4444";
 /** Behind exported images. */
 const EXPORT_BACKGROUND = "#ffffff";
 /** Shown in place of a frame's name until it has one. */
@@ -243,7 +266,7 @@ const MAX_PASTED_TEXT_WIDTH = 640;
 const IMAGE_SCREEN_SHARE = 0.6;
 
 /** The tools that work on a board that can't be edited. */
-const VIEW_TOOLS: ReadonlySet<ToolName> = new Set(["select", "hand"]);
+const VIEW_TOOLS: ReadonlySet<ToolName> = new Set(["select", "hand", "laser"]);
 
 const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
   v: "select",
@@ -256,6 +279,7 @@ const TOOL_KEYS: Readonly<Record<string, ToolName>> = {
   t: "text",
   p: "pen",
   f: "frame",
+  k: "laser",
 };
 
 /**
@@ -316,6 +340,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     canRedo: doc.canRedo(),
     readOnly: doc.readOnly,
     editing: null,
+    following: null,
     selectionLabel: "",
     selectionReactions: [],
   };
@@ -361,13 +386,62 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     options.onPointerMove(world);
   };
 
-  const setCamera = (camera: Camera) => {
+  /** Tells `onView` what part of the board is on screen, or null while following. */
+  let reportedView: string | null = null;
+  const reportView = () => {
+    if (!options.onView) return;
+    const { camera, viewport } = state;
+    const view: View | null =
+      state.following !== null || viewport.width === 0
+        ? null
+        : {
+            x: round1(camera.x),
+            y: round1(camera.y),
+            w: round1(viewport.width / camera.zoom),
+            h: round1(viewport.height / camera.zoom),
+          };
+    const key = JSON.stringify(view);
+    if (key === reportedView) return;
+    reportedView = key;
+    options.onView(view);
+  };
+
+  /** Moves the camera, however it came to move. */
+  const moveCamera = (camera: Camera) => {
     const current = state.camera;
     if (camera.x === current.x && camera.y === current.y && camera.zoom === current.zoom) return;
     setState({ ...state, camera });
     markAllDirty();
     // Panning or zooming moves the board under a still pointer.
     reportPointer();
+    reportView();
+  };
+
+  /** Where the camera is heading while following, eased toward frame by frame. */
+  let followTarget: Camera | null = null;
+
+  const stopFollowing = () => {
+    followTarget = null;
+    if (state.following === null) return;
+    setState({ ...state, following: null });
+    reportView();
+  };
+
+  /** A camera move by this user (pan, zoom, keyboard): it ends following. */
+  const setCamera = (camera: Camera) => {
+    stopFollowing();
+    moveCamera(camera);
+  };
+
+  const trails = new LaserTrails();
+  const laser = (p: Point | null) => {
+    trails.hold("me", p !== null);
+    if (p) {
+      trails.add("me", p, performance.now());
+      markDirty(overlay);
+      schedule();
+    }
+    options.onLaser?.(p);
   };
 
   /** What the panel shows about a selection. */
@@ -482,6 +556,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       editor.start(shape, true);
     },
     fittedHeight: (shape) => layouts.fittedHeight(shape),
+    laser,
   };
   const interaction = new Interaction(host);
 
@@ -491,12 +566,21 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     const started = performance.now();
     flushWrite();
     frame = null;
-    const { camera, viewport } = state;
     const pr = pixelRatio;
 
     const elapsed = lastFrameAt === null ? FRAME_MS : Math.min(now - lastFrameAt, 100);
+    // Closing on the followed view: moving the camera marks every layer dirty.
+    const following = followTarget !== null;
+    if (followTarget) {
+      const next = easeCamera(state.camera, followTarget, elapsed);
+      if (next === followTarget) followTarget = null;
+      moveCamera(next);
+    }
+    const { camera, viewport } = state;
     const cursorsMoved = cursors.step(elapsed, CURSOR_SETTLE_PX / camera.zoom);
     if (cursorsMoved) overlay.dirty = true;
+    const lasering = trails.step(now);
+    if (lasering) overlay.dirty = true;
 
     if (background.dirty) {
       background.ctx.setTransform(pr, 0, 0, pr, 0, 0);
@@ -538,8 +622,9 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
     options.onFrame?.({ ms: performance.now() - started, drawn });
 
-    // Keep drawing frames while remote cursors glide; stop once they've landed.
-    if (cursorsMoved) {
+    // Keep drawing frames while remote cursors glide, a laser fades or the
+    // camera closes on a followed view; stop once they've landed.
+    if (cursorsMoved || lasering || following) {
       lastFrameAt = now;
       schedule();
     } else {
@@ -692,6 +777,36 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       ctx.lineWidth = 1.5;
     }
 
+    // Laser pointers: a trail that fades, with a dot where it is now.
+    const clock = performance.now();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const [key, trail] of trails.entries()) {
+      const color =
+        key === "me" ? LASER_OWN : (peers.find((p) => p.id === key)?.color ?? LASER_OWN);
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 4;
+      for (let i = 1; i < trail.length; i++) {
+        const a = trail[i - 1] as { x: number; y: number; t: number };
+        const b = trail[i] as { x: number; y: number; t: number };
+        ctx.globalAlpha = laserAlpha(clock - b.t);
+        outline([a, b], false);
+      }
+      const head = trail.at(-1);
+      if (head) {
+        const at = toScreen(head);
+        ctx.globalAlpha = laserAlpha(clock - head.t);
+        ctx.beginPath();
+        ctx.arc(at.x, at.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+    ctx.lineWidth = 1.5;
+
     // Their cursors go over everything.
     for (const peer of peers) {
       const at = cursors.position(peer.id);
@@ -712,6 +827,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     }
     setState({ ...state, camera, viewport });
     schedule();
+    if (state.following !== null) followView(true);
+    reportView();
   };
 
   const viewportCenter = () => ({ x: state.viewport.width / 2, y: state.viewport.height / 2 });
@@ -739,10 +856,50 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     doc.checkpoint();
   };
 
+  /** Heads for the view of the peer being followed (at once, the first time). */
+  const followView = (snap: boolean) => {
+    const peer = peers.find((p) => p.id === state.following);
+    if (!peer) {
+      stopFollowing();
+      return;
+    }
+    const camera = peer.view && followCamera(peer.view, state.viewport);
+    if (!camera) return;
+    if (snap) {
+      followTarget = null;
+      moveCamera(camera);
+    } else {
+      followTarget = camera;
+      schedule();
+    }
+  };
+
+  const follow = (id: number | null) => {
+    if (id === null || id === state.following) {
+      if (id === null) stopFollowing();
+      return;
+    }
+    if (!peers.some((p) => p.id === id)) return;
+    setState({ ...state, following: id });
+    reportView();
+    followView(true);
+  };
+
   const setPeers = (next: readonly RemotePeer[]) => {
+    const now = performance.now();
+    for (const peer of next) {
+      if (peer.laser) trails.add(peer.id, peer.laser, now);
+      trails.hold(peer.id, !!peer.laser);
+    }
     peers = next;
     cursors.retarget(next);
     markDirty(overlay);
+    // Their lasers fade out; a peer who left takes the rest of theirs with them.
+    for (const [key] of trails.entries()) {
+      if (key !== "me" && !next.some((p) => p.id === key)) trails.remove(key);
+    }
+    if (state.following !== null) followView(false);
+    if (next.some((p) => p.laser)) schedule();
   };
 
   const pointerMoved = (screen: Point | null) => {
@@ -1116,6 +1273,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     toggleReaction,
     editText,
     setPeers,
+    follow,
     undo,
     redo,
     exportImage(format) {
@@ -1196,6 +1354,8 @@ function drawCursor(ctx: CanvasRenderingContext2D, at: Point, peer: RemotePeer):
   }
   ctx.restore();
 }
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 function readTheme(container: HTMLElement, dark: boolean): Theme {
   const style = getComputedStyle(container);

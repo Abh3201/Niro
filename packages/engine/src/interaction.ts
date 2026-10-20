@@ -68,7 +68,8 @@ export type ToolName =
   | "arrow"
   | "text"
   | "pen"
-  | "frame";
+  | "frame"
+  | "laser";
 
 /** The tools that drag out a shape of their own type. */
 type ShapeTool = "rectangle" | "ellipse" | "sticky" | "line" | "arrow" | "frame";
@@ -115,6 +116,8 @@ export interface EditorHost {
   startDraft(shape: Shape): void;
   /** The height a text shape needs for its text. */
   fittedHeight(shape: Shape): number;
+  /** The laser pointer is at `p`, or (null) was let go. */
+  laser?(p: Point | null): void;
 }
 
 /** Hit tolerance around shapes and lines, in CSS pixels. */
@@ -186,6 +189,8 @@ type Gesture =
       from: ShapeId | null;
       target: ShapeId | null;
     }
+  /** The laser pointer: shown to everyone, never stored. */
+  | { kind: "laser" }
   /** A pen stroke, drawn in the overlay until it's finished. */
   | { kind: "draw"; points: PenPoint[] }
   /** The text tool: a click places a text shape, a drag sets its width. `onto` is a text shape clicked to edit it. */
@@ -292,6 +297,11 @@ export class Interaction {
       this.gesture = { kind: "text", start: p, current: p, dragged: false, onto };
       return true;
     }
+    if (tool === "laser") {
+      this.gesture = { kind: "laser" };
+      this.host.laser?.(p.world);
+      return true;
+    }
     if (tool === "pen") {
       // Each stroke is its own undo step, however quickly the next follows.
       this.host.doc.checkpoint();
@@ -314,6 +324,10 @@ export class Interaction {
       g.current = p;
       g.dragged ||= distance(p.screen, g.start.screen) >= dragThreshold(p);
       if (g.dragged) this.host.overlayChanged();
+      return;
+    }
+    if (g.kind === "laser") {
+      this.host.laser?.(p.world);
       return;
     }
     if (g.kind === "draw") {
@@ -342,6 +356,7 @@ export class Interaction {
     // whatever gesture is still running.
     this.gesture = { kind: "idle" };
     this.snapGuides = [];
+    if (g.kind === "laser") this.host.laser?.(null);
     if (g.kind === "pending") g.onClick?.();
     if (g.kind === "resize") this.finishResize(g);
     if (g.kind === "create") this.finishCreate(g, p);
@@ -368,6 +383,7 @@ export class Interaction {
       this.host.scheduleWrite(() => this.host.transact((tx) => tx.remove(id)));
     }
     if (g.kind === "marquee") this.host.setSelection(g.base);
+    if (g.kind === "laser") this.host.laser?.(null);
     // A cancelled pen stroke was only ever in the overlay.
     this.host.flushWrite();
     this.endStep();

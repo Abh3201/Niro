@@ -7,6 +7,7 @@ import {
   expectStatus,
   layerPixelAt,
   openBoard,
+  TRANSPARENT,
   waitUntilLive,
 } from "./helpers";
 
@@ -43,7 +44,7 @@ test("two editors on one link see each other's shapes, cursor and name", async (
 
   const avatars = alice.page.getByTestId("avatar");
   await expect(avatars).toHaveCount(1);
-  await expect(avatars).toHaveAttribute("title", "Bob Builder");
+  await expect(avatars).toHaveAttribute("title", "Follow Bob Builder");
 
   // Bob's pointer, drawn on Alice's screen in his color: (2, 10) is inside the arrow.
   await bob.page.mouse.move(300, 500, { steps: 4 });
@@ -209,4 +210,66 @@ test("text typed with an input method arrives whole, after someone else's typing
 
   await alice.context.close();
   await bob.context.close();
+});
+
+test("clicking someone's avatar follows their view until you move yourself", async ({
+  browser,
+}) => {
+  const alice = await person(browser);
+  const bob = await person(browser, { name: "Bob Builder", color: "#b91c1c" });
+  await openBoard(alice.page);
+  await join(bob.page, alice.page.url());
+  await drawRectangle(alice.page, { x: 520, y: 280 }, { x: 760, y: 440 });
+  await expectPixel(bob.page, 640, 360, BLUE);
+
+  await alice.page.getByTestId("avatar").click();
+  await expect(alice.page.getByTestId("following")).toHaveText(/Following Bob Builder/);
+
+  // Bob pans 300px left; Alice's view follows.
+  await bob.page.mouse.move(640, 600);
+  await bob.page.mouse.wheel(300, 0);
+  await expectPixel(bob.page, 340, 360, BLUE);
+  await expectPixel(alice.page, 340, 360, BLUE);
+  await expectPixel(alice.page, 640, 360, TRANSPARENT);
+
+  // Alice pans herself: she stops following, and Bob's next move doesn't move her.
+  await alice.page.mouse.move(640, 600);
+  await alice.page.mouse.wheel(0, 100);
+  await expect(alice.page.getByTestId("following")).toHaveCount(0);
+  await bob.page.mouse.wheel(100, 0);
+  await expectPixel(bob.page, 240, 360, BLUE);
+  await expectPixel(alice.page, 340, 260, BLUE);
+
+  await bob.context.close();
+  await alice.context.close();
+});
+
+test("a laser pointer shows to everyone, and viewers can use it", async ({ browser }) => {
+  const editor = await person(browser);
+  const viewer = await person(browser, { name: "Vera View", color: "#b91c1c" });
+  await openBoard(editor.page);
+  await editor.page.getByTestId("share-button").click();
+  const viewLink = await editor.page.getByTestId("share-view-link").inputValue();
+  await join(viewer.page, viewLink);
+  await expect(viewer.page.getByTestId("view-only")).toBeVisible();
+
+  await viewer.page.keyboard.press("k");
+  await expect(viewer.page.getByTestId("tool-laser")).toHaveAttribute("aria-pressed", "true");
+  await viewer.page.mouse.move(300, 500);
+  await viewer.page.mouse.down();
+  await viewer.page.mouse.move(305, 500, { steps: 3 });
+  // The dot is drawn in her color just up and left of where the pointer is, then fades.
+  await expect
+    .poll(async () => {
+      const [r = 0, , , a = 0] = await layerPixelAt(editor.page, "overlay", 303, 498);
+      return a > 60 && r > 150;
+    })
+    .toBe(true);
+  await viewer.page.mouse.up();
+  await expect
+    .poll(async () => (await layerPixelAt(editor.page, "overlay", 303, 498))[3], { timeout: 4000 })
+    .toBe(0);
+
+  await viewer.context.close();
+  await editor.context.close();
 });

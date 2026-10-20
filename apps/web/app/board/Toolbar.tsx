@@ -6,6 +6,7 @@ import {
   FrameIcon,
   HandIcon,
   ImageIcon,
+  LaserIcon,
   LineIcon,
   PenIcon,
   RectangleIcon,
@@ -28,7 +29,11 @@ const TOOLS: ReadonlyArray<{ tool: ToolName; label: string; key: string; icon: R
   { tool: "arrow", label: "Arrow", key: "A", icon: <ArrowIcon /> },
   { tool: "pen", label: "Pen", key: "P", icon: <PenIcon /> },
   { tool: "frame", label: "Frame", key: "F", icon: <FrameIcon /> },
+  { tool: "laser", label: "Laser pointer", key: "K", icon: <LaserIcon /> },
 ];
+
+/** The tools a board that can't be edited still has. */
+const VIEW_TOOLS: readonly ToolName[] = ["select", "hand", "laser"];
 
 /** Tool picker and the image button, plus undo and redo underneath. */
 export function Toolbar({ engine, onImage }: { engine: Engine; onImage(file: File): void }) {
@@ -41,7 +46,7 @@ export function Toolbar({ engine, onImage }: { engine: Engine; onImage(file: Fil
   return (
     <div className="toolbar">
       <div className="panel tools" role="toolbar" aria-label="Tools" aria-orientation="vertical">
-        {TOOLS.filter(({ tool }) => !readOnly || tool === "select" || tool === "hand").map(
+        {TOOLS.filter(({ tool }) => !readOnly || VIEW_TOOLS.includes(tool)).map(
           ({ tool, label, key, icon }) => (
             <button
               key={tool}

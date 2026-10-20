@@ -1,4 +1,5 @@
 import type { ShapeId } from "@niro/doc";
+import type { View } from "./follow";
 import type { Point } from "./geometry";
 
 /** Someone else on the board, as the engine draws them. Never part of the document. */
@@ -11,6 +12,10 @@ export interface RemotePeer {
   /** Their pointer in world coordinates, or null when it isn't over the board. */
   readonly cursor: Point | null;
   readonly selection: readonly ShapeId[];
+  /** Where their laser pointer is, in world coordinates, while they hold it down. */
+  readonly laser?: Point | null;
+  /** The part of the board they see, for following them; null while they follow someone themselves. */
+  readonly view?: View | null;
 }
 
 /**
