@@ -5,6 +5,7 @@ import { currentKey } from "./access";
 import { firstImage, ImageError } from "./assets";
 import { useClipboard } from "./clipboard";
 import { ExportControls } from "./ExportControls";
+import { Minimap } from "./Minimap";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
 import { loadUserId } from "./presence";
@@ -172,6 +173,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
           <SelectionPanel engine={session.engine} />
           <ZoomControls engine={session.engine} onHelp={openHelp} />
           <ExportControls engine={session.engine} />
+          <Minimap engine={session.engine} />
           {searchOpen && (
             <SearchPanel
               engine={session.engine}

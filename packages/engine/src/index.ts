@@ -17,5 +17,13 @@ export {
 export type { View } from "./follow";
 export type { Box, Point, Viewport } from "./geometry";
 export type { ImageLoader } from "./images";
+export {
+  fitOverview,
+  type Overview,
+  type OverviewFit,
+  type OverviewItem,
+  overviewToWorld,
+  worldToOverview,
+} from "./overview";
 export type { RemotePeer } from "./presence";
 export { DARK_PALETTE, LIGHT_PALETTE, type Palette } from "./render";
