@@ -13,3 +13,4 @@ test-results/
 bench-results.json
 out/
 *.PublishSettings
+.vercel/

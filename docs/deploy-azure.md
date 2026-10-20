@@ -23,7 +23,7 @@ From Microsoft's [App Service limits](https://learn.microsoft.com/azure/azure-re
 - **No Always On.** An app nobody has used for about 20 minutes is unloaded, and the next visit waits for it to start (tens of seconds). The realtime server writes every open board when it's stopped, so nothing is lost; browsers reconnect by themselves.
 - **1 GB of memory and 1 GB of disk**, shared by the plan. Niro's two apps take about 80 MB of disk. Step 4 caps the realtime server's open boards at about 250 MB of memory (`NIRO_MAX_OPEN_MB=10`).
 - **One instance.** That suits Niro, which allows only one realtime server per database anyway.
-- **No custom domain with HTTPS.** Use the `azurewebsites.net` addresses.
+- **No custom domain with HTTPS.** Use the `azurewebsites.net` addresses, or put the web app on Vercel with your domain: [deploy-vercel.md](deploy-vercel.md).
 - **Starter subscriptions are for development and testing**, and Microsoft may remove the apps if the subscription goes unused for 90 days.
 - **No custom containers.** Free Linux plans run built-in runtimes only, which is why this guide uses zip packages instead of Niro's Docker images.
 
@@ -104,7 +104,7 @@ Pull the new version, run `./deploy/azure/package.sh` again, and repeat the two 
 
 ## Deploy automatically from GitHub
 
-[`.github/workflows/deploy-azure.yml`](../.github/workflows/deploy-azure.yml) builds both packages and deploys them each time CI passes on `main`, realtime server first. It does nothing until you set it up, and you can also run it by hand from the **Actions** tab (**Deploy to Azure**, **Run workflow**).
+[`.github/workflows/deploy-azure.yml`](../.github/workflows/deploy-azure.yml) builds both packages and deploys them each time CI passes on `main`, realtime server first. It does nothing until you set it up, and you can also run it by hand from the **Actions** tab (**Deploy**, **Run workflow**). The same workflow can deploy the web app to Vercel instead of, or as well as, Azure: see [deploy-vercel.md](deploy-vercel.md#3-deploy-from-github-after-ci).
 
 It signs in with each app's publish profile, which needs basic authentication turned on for deployments (new apps may have it off). Run this once, with the names from step 3:
 
