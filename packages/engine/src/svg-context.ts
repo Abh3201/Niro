@@ -18,6 +18,8 @@ interface State {
   strokeStyle: string;
   lineWidth: number;
   lineCap: CanvasLineCap;
+  /** Lengths of dashes and gaps, as `setLineDash` takes them. */
+  dash: number[];
   globalAlpha: number;
   font: string;
   textAlign: CanvasTextAlign;
@@ -69,6 +71,7 @@ export class SvgContext {
     strokeStyle: "#000",
     lineWidth: 1,
     lineCap: "butt",
+    dash: [],
     globalAlpha: 1,
     font: "10px sans-serif",
     textAlign: "start",
@@ -103,6 +106,9 @@ export class SvgContext {
   }
   set lineCap(value: CanvasLineCap) {
     this.state.lineCap = value;
+  }
+  setLineDash(dash: number[]): void {
+    this.state.dash = [...dash];
   }
   get globalAlpha(): number {
     return this.state.globalAlpha;
@@ -274,11 +280,12 @@ export class SvgContext {
   }
 
   private paint(kind: "fill" | "stroke"): string {
-    const { globalAlpha, strokeStyle, lineWidth, lineCap, fillStyle } = this.state;
+    const { globalAlpha, strokeStyle, lineWidth, lineCap, fillStyle, dash } = this.state;
     const alpha = globalAlpha < 1 ? ` opacity="${n(globalAlpha)}"` : "";
     if (kind === "fill") return ` fill="${xml(fillStyle)}"${alpha}`;
     const cap = lineCap === "butt" ? "" : ` stroke-linecap="${lineCap}"`;
-    return ` stroke="${xml(strokeStyle)}" stroke-width="${n(lineWidth)}"${cap}${alpha}`;
+    const dashes = dash.length > 0 ? ` stroke-dasharray="${dash.map(n).join(" ")}"` : "";
+    return ` stroke="${xml(strokeStyle)}" stroke-width="${n(lineWidth)}"${cap}${dashes}${alpha}`;
   }
 
   private box(x: number, y: number, w: number, h: number): string {

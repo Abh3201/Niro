@@ -9,8 +9,9 @@ import { isValidIndex } from "./order";
  * 3: freehand strokes, and arrows that can be attached to shapes.
  * 4: groups and frames, with positions inside a frame measured from the frame.
  * 5: images, and emoji reactions on shapes.
+ * 6: locked shapes, and line styles (dashes, thickness, arrowheads).
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
@@ -59,6 +60,24 @@ export function isLinear(type: ShapeType): boolean {
  */
 export const POINT_SCALE = 10_000;
 export const PRESSURE_SCALE = 100;
+
+/** How a line or arrow is dashed. Absent means solid. */
+export const DASHES = ["solid", "dashed", "dotted"] as const;
+export type LineDash = (typeof DASHES)[number];
+
+/** How thick a line or arrow is drawn. Absent means medium. */
+export const THICKNESSES = ["thin", "medium", "thick"] as const;
+export type LineThickness = (typeof THICKNESSES)[number];
+
+/**
+ * Where a line or arrow has a head. Absent means the end for an arrow and
+ * none for a line.
+ */
+export const HEADS = ["none", "end", "start", "both"] as const;
+export type LineHead = (typeof HEADS)[number];
+
+/** The heads a line or arrow has when none are stored. */
+export const defaultHead = (type: ShapeType): LineHead => (type === "arrow" ? "end" : "none");
 
 /**
  * Colors are stored by name, not as hex, so each theme (light, dark) can draw
@@ -195,6 +214,16 @@ export interface Shape {
   readonly asset?: string;
   /** Emoji reactions, when there are any. Changed with `Tx.react`. */
   readonly reactions?: Reactions;
+  /**
+   * The shape (and what's in it) can't be moved, resized, restyled or
+   * deleted until it's unlocked. Only present when true. A guard against
+   * accidents, not a permission: everyone with an edit link can unlock.
+   */
+  readonly locked?: boolean;
+  /** Lines and arrows only; present only when not the default (solid, medium, the type's usual heads). */
+  readonly dash?: LineDash;
+  readonly thickness?: LineThickness;
+  readonly head?: LineHead;
 }
 
 /** Fields `Tx.update` can set. Text changes go through `Tx.editText`, reactions through `Tx.react`; points and assets never change. */
@@ -253,6 +282,13 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     isArrow && typeof value === "string" && value !== id ? (value as ShapeId) : null;
   const asset = raw.asset;
   const reactions = readReactions(raw);
+  const oneOf = <T extends string>(list: readonly T[], value: unknown): T | undefined =>
+    typeof value === "string" && (list as readonly string[]).includes(value)
+      ? (value as T)
+      : undefined;
+  const dash = isLine ? oneOf(DASHES, raw.dash) : undefined;
+  const thickness = isLine ? oneOf(THICKNESSES, raw.thickness) : undefined;
+  const head = isLine ? oneOf(HEADS, raw.head) : undefined;
 
   return {
     id: id as ShapeId,
@@ -276,6 +312,10 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
       asset: typeof asset === "string" && ASSET_ID.test(asset) ? asset : "",
     }),
     ...(reactions && { reactions }),
+    ...(raw.locked === true && { locked: true }),
+    ...(dash && dash !== "solid" && { dash }),
+    ...(thickness && thickness !== "medium" && { thickness }),
+    ...(head && head !== defaultHead(shapeType) && { head }),
   };
 }
 

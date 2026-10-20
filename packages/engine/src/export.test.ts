@@ -124,3 +124,25 @@ describe("pngScale", () => {
     expect((20_000 * big) ** 2).toBeLessThanOrEqual(64_000_000 + 1);
   });
 });
+
+describe("exportSvg line styles", () => {
+  it("writes dashes and the line's width", () => {
+    const svg = exportSvg(
+      input([
+        shape("dashed", { type: "line", color: "black", w: 200, h: 0, dash: "dashed" }),
+        shape("thick", {
+          type: "line",
+          color: "black",
+          y: 50,
+          w: 200,
+          h: 0,
+          thickness: "thick",
+          index: "a1",
+        }),
+      ]),
+    ) as string;
+    expect(svg).toContain('stroke-dasharray="12 10"');
+    expect(svg).toContain('stroke-width="8"');
+    expect(count(svg, "stroke-dasharray")).toBe(1);
+  });
+});

@@ -35,6 +35,8 @@ import { shapeBounds } from "./shapes";
 import { type Guide, SNAP_PX, snapBox } from "./snapping";
 import {
   adoptInto,
+  hasLocked,
+  isLocked,
   movers,
   outermost,
   placeNew,
@@ -264,10 +266,11 @@ export class Interaction {
     return this.hoverCursor;
   }
 
-  /** What the selection's handles act on. */
+  /** What the selection's handles act on; none for a selection with something locked in it. */
   frame(): SelectionFrame | null {
     const { scene } = this.host;
     const ids = this.host.selection();
+    if (hasLocked(scene, ids)) return null;
     const shapes = ids.map((id) => scene.get(id)).filter((s): s is Shape => s !== undefined);
     const rotatable = !withDescendants(scene, ids).some((id) => scene.get(id)?.type === "frame");
     return selectionFrame(shapes, rotatable);
@@ -475,7 +478,20 @@ export class Interaction {
 
     const selection = host.selection();
     const hit = this.unitAt(p);
-    const onDrag = readOnly ? "none" : "move";
+    // Locked shapes can be picked (to unlock them) but not dragged, and a
+    // drag that starts on one is a marquee, as though it were the board.
+    const lockedHit = hit !== null && hasLocked(host.scene, [hit]);
+    const onDrag = readOnly || lockedHit || hasLocked(host.scene, selection) ? "none" : "move";
+    if (hit && lockedHit && !p.shiftKey) {
+      host.setSelection([]);
+      this.gesture = {
+        kind: "pending",
+        start: p,
+        onDrag: readOnly || p.pointerType === "touch" ? "none" : "marquee",
+        onClick: () => host.setSelection([hit]),
+      };
+      return true;
+    }
     if (hit) {
       const selected = selection.includes(hit);
       if (p.shiftKey) {
@@ -571,8 +587,8 @@ export class Interaction {
         const box = boxFromPoints([g.start.world, g.current]);
         const ids = new Set(g.base);
         for (const shape of host.scene.inBox(box)) {
-          // Groups are found through what's in them.
-          if (shape.type === "group") continue;
+          // Groups are found through what's in them; locked shapes are left alone.
+          if (shape.type === "group" || isLocked(host.scene, shape.id)) continue;
           const unit = selectableUnit(host.scene, shape.id, g.base);
           const unitShape = host.scene.get(unit);
           // A frame is selected only when the marquee takes it in whole, so

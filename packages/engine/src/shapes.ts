@@ -8,6 +8,7 @@ import {
   polygonIntersectsBox,
   rotateAround,
 } from "./geometry";
+import { LINE_WIDTH, lineWidthOf } from "./line-style";
 import { FRAME_LABEL_HEIGHT } from "./text";
 
 /** Geometry of shapes in world coordinates. See `Shape` for what x, y, w, h mean per type. */
@@ -65,7 +66,10 @@ export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
   if (shape.type === "group") return false;
   if (isLinear(shape.type)) {
     const [a, b] = lineEnds(shape);
-    return distanceToSegment(p, a, b) <= tolerance;
+    // A thicker line is wider to hit than the default one the tolerance is for.
+    return (
+      distanceToSegment(p, a, b) <= tolerance + Math.max(0, (lineWidthOf(shape) - LINE_WIDTH) / 2)
+    );
   }
   const local = toShapeFrame(shape, p);
   const rx = shape.w / 2 + tolerance;

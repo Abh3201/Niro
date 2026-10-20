@@ -129,6 +129,20 @@ body {
   transform: translateX(-50%);
 }
 
+.line-panel {
+  top: 64px;
+}
+
+.line-style {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
 .swatches {
   display: flex;
   gap: 4px;

@@ -30,19 +30,20 @@ export function describeShape(scene: Scene, id: ShapeId): string {
   if (!shape) return "";
   if (shape.type === "group") {
     const n = scene.childrenOf(id).length;
-    return `Group of ${n} ${n === 1 ? "shape" : "shapes"}`;
+    return `Group of ${n} ${n === 1 ? "shape" : "shapes"}${shape.locked ? ", locked" : ""}`;
   }
   const text = shape.text.replace(/\s+/g, " ").trim();
   const excerpt = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text;
   if (shape.type === "frame") {
     const n = scene.childrenOf(id).length;
-    return `Frame${excerpt ? ` "${excerpt}"` : ""}, holding ${n} ${n === 1 ? "shape" : "shapes"}`;
+    return `Frame${excerpt ? ` "${excerpt}"` : ""}${shape.locked ? ", locked" : ""}, holding ${n} ${n === 1 ? "shape" : "shapes"}`;
   }
   const color =
     shape.type === "text" || shape.type === "freehand" || shape.type === "image"
       ? ""
       : `, ${shape.color}`;
-  return `${NAMES[shape.type]}${color}${excerpt ? `: ${excerpt}` : ""}${describeReactions(shape)}`;
+  const locked = shape.locked ? ", locked" : "";
+  return `${NAMES[shape.type]}${color}${locked}${excerpt ? `: ${excerpt}` : ""}${describeReactions(shape)}`;
 }
 
 /** ", 3 reactions", or nothing. */

@@ -25,6 +25,7 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Add an image | The image button in the toolbar, paste one (Ctrl/Cmd + `V`), or drop a file on the board. PNG, JPEG, GIF or WebP; big pictures are shrunk to 2048 pixels. Resizing keeps its proportions; Shift lets them go |
 | React | Select shapes and pick an emoji in the panel at the top: 👍 ❤️ 😂 🎉 😮 👀. Everyone sees the counts under the shape; pick it again to take yours back |
 | Follow, point | Click someone's avatar (top right) to see what they see; panning or zooming yourself stops it. `K` picks the laser pointer: hold and drag, and everyone sees a trail that fades (view-only visitors can use it too) |
+| Lock, line style | Lock selected shapes (panel at the top, or Shift + Alt + `L`) so they can't be moved, edited or deleted by accident; click one to unlock it. Lines and arrows can be solid, dashed or dotted, thin to thick, with a head at either or both ends |
 | Share | **Share**, top right: an edit link and a view-only link, and your name as others see it. Whoever has a link has that access; there are no accounts |
 
 ## Run it with Docker

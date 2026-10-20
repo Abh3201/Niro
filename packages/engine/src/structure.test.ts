@@ -6,6 +6,8 @@ import {
   adoptInto,
   duplicate,
   group,
+  hasLocked,
+  isLocked,
   placeNew,
   releaseOutside,
   remove,
@@ -13,6 +15,7 @@ import {
   reparentOnMove,
   selectableUnit,
   sharedColor,
+  sharedLineStyle,
   stepInto,
   styleTargets,
   ungroup,
@@ -205,6 +208,55 @@ describe("duplicate", () => {
     const arrow = inner[2] as Shape;
     expect([arrow.from, arrow.to]).toEqual([inner[0]?.id, inner[1]?.id]);
     expect(scene.childrenOf(null)).toEqual(["f", copy]);
+  });
+});
+
+describe("locks", () => {
+  it("lock what's in a locked group or frame, and refuse edits to anything that holds a lock", () => {
+    const { scene } = board([
+      frame("f", 0, 0, 200, 200, { locked: true }),
+      box("in", 10, 10, 10, 10, { parentId: id("f") }),
+      box("free", 300, 0),
+      groupShape("g"),
+      box("held", 400, 0, 10, 10, { parentId: id("g"), locked: true }),
+    ]);
+    expect(isLocked(scene, id("in"))).toBe(true);
+    expect(isLocked(scene, id("free"))).toBe(false);
+    // The group itself isn't locked, but one shape in it is: moving the group would move that.
+    expect(isLocked(scene, id("g"))).toBe(false);
+    expect(hasLocked(scene, [id("g")])).toBe(true);
+    expect(hasLocked(scene, [id("free")])).toBe(false);
+    expect(hasLocked(scene, [id("free"), id("f")])).toBe(true);
+  });
+
+  it("starts copies unlocked", () => {
+    const { scene, edit } = board([box("a", 0, 0, 10, 10, { locked: true })]);
+    const [copy] = edit((tx) => duplicate(scene, tx, [id("a")], 24));
+    expect(scene.get(copy as ShapeId)?.locked).toBeUndefined();
+    expect(scene.get(id("a"))?.locked).toBe(true);
+  });
+});
+
+describe("sharedLineStyle", () => {
+  const line = (name: string, patch: Partial<Shape> = {}) =>
+    box(name, 0, 0, 10, 0, { type: "line", color: "black", ...patch });
+
+  it("reports what lines share, and null where they differ or a shape isn't a line", () => {
+    const { scene } = board([
+      line("a", { dash: "dashed" }),
+      line("b", { dash: "dashed", thickness: "thick" }),
+      box("arrow", 0, 0, 10, 0, { type: "arrow", color: "black" }),
+      box("r", 0, 0),
+    ]);
+    expect(sharedLineStyle(scene, [id("a"), id("b")])).toEqual({
+      dash: "dashed",
+      thickness: null,
+      head: "none",
+    });
+    // An arrow's default head is at its end; a line's is none.
+    expect(sharedLineStyle(scene, [id("a"), id("arrow")])?.head).toBeNull();
+    expect(sharedLineStyle(scene, [id("a"), id("r")])).toBeNull();
+    expect(sharedLineStyle(scene, [])).toBeNull();
   });
 });
 

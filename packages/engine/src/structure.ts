@@ -1,10 +1,14 @@
 import {
   type ColorName,
   DEFAULT_COLOR,
+  defaultHead,
   indexesAbove,
   indexesBelow,
   indexesBetween,
   isLinear,
+  type LineDash,
+  type LineHead,
+  type LineThickness,
   newShapeId,
   reorderStep,
   reorderToEnd,
@@ -99,6 +103,51 @@ export function movers(scene: Scene, ids: Iterable<ShapeId>): ShapeId[] {
   };
   for (const id of outermost(scene, ids)) visit(id);
   return result;
+}
+
+/** True when shape `id` is locked, or is in a locked group or frame. */
+export function isLocked(scene: Scene, id: ShapeId): boolean {
+  if (scene.get(id)?.locked) return true;
+  return scene.ancestorsOf(id).some((a) => scene.get(a)?.locked === true);
+}
+
+/**
+ * True when changing `ids` would touch a locked shape: one of them, one in
+ * them, or one they're in. Those edits are refused until it's unlocked.
+ */
+export function hasLocked(scene: Scene, ids: Iterable<ShapeId>): boolean {
+  return withDescendants(scene, ids).some((id) => isLocked(scene, id));
+}
+
+/** `shape` without a lock: copies of a locked shape start out free. */
+export function unlocked(shape: Shape): Shape {
+  const { locked: _, ...rest } = shape;
+  return rest;
+}
+
+/** The line style every line or arrow among `ids` shares, per property; null when it differs, or nothing here is a line. */
+export interface LineStyle {
+  readonly dash: LineDash | null;
+  readonly thickness: LineThickness | null;
+  readonly head: LineHead | null;
+}
+
+/**
+ * The shared line style of the selection, or null unless every shape a
+ * style change would touch is a line or an arrow.
+ */
+export function sharedLineStyle(scene: Scene, ids: Iterable<ShapeId>): LineStyle | null {
+  const targets = shapesOf(scene, styleTargets(scene, ids));
+  if (targets.length === 0 || !targets.every((s) => isLinear(s.type))) return null;
+  const common = <T>(value: (s: Shape) => T): T | null => {
+    const first = value(targets[0] as Shape);
+    return targets.every((s) => value(s) === first) ? first : null;
+  };
+  return {
+    dash: common((s) => s.dash ?? "solid"),
+    thickness: common((s) => s.thickness ?? "medium"),
+    head: common((s) => s.head ?? defaultHead(s.type)),
+  };
 }
 
 /**
@@ -379,7 +428,7 @@ export function duplicate(
   for (const shape of shapesOf(scene, all)) {
     const parent = scene.parentOf(shape.id);
     tx.add({
-      ...shape,
+      ...unlocked(shape),
       ...translate(shape, offset, offset),
       id: copyId.get(shape.id) as ShapeId,
       parentId: copyId.get(parent as ShapeId) ?? parent,
