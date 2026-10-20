@@ -31,7 +31,8 @@ The first release: a whiteboard you can run yourself and share by link.
 - Emoji reactions on any shape, shown under it for everyone.
 - Pan and zoom with a mouse, a trackpad or touch.
 - Export the selection or the whole board as PNG or SVG.
-- Light and dark boards: they follow the system theme, or switch with the button next to the zoom controls. Each browser remembers its own choice.
+- Light and dark boards: boards are light until you switch with the button next to the zoom controls. Each browser remembers its own choice.
+- A Niro icon for browser tabs, bookmarks and home screens.
 - Keyboard: Tab steps through shapes in reading order, `?` lists every shortcut. Screen readers announce the selected shape and can read a list of the board's shapes.
 - Boards of 10,000 shapes stay smooth: only what's on screen is drawn, with less detail when zoomed out.
 

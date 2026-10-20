@@ -1,20 +1,21 @@
 import type { ColorScheme } from "@niro/engine";
 import { useSyncExternalStore } from "react";
-import { usePrefersDark } from "./usePrefersDark";
 
 /**
  * Whether boards are light or dark. A choice of this browser, like your
  * name and color: kept in localStorage and never put in the board, so
- * everyone on a board picks their own.
+ * everyone on a board picks their own. Light until dark is chosen; the
+ * system setting isn't followed.
  */
-export type ThemeChoice = ColorScheme | "system";
+export type ThemeChoice = ColorScheme;
 
 const STORAGE = "niro:theme";
+const DEFAULT: ThemeChoice = "light";
 const listeners = new Set<() => void>();
 
 /**
- * Inlined in <head>, so a saved choice applies before the first paint
- * instead of flashing the system theme. Does what `apply` does.
+ * Inlined in <head>, so a saved dark choice applies before the first paint
+ * instead of flashing light. Does what `apply` does.
  */
 export const THEME_SCRIPT = `try{var t=localStorage.getItem(${JSON.stringify(STORAGE)});if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
 
@@ -23,22 +24,19 @@ export function getThemeChoice(): ThemeChoice {
     const stored = localStorage.getItem(STORAGE);
     if (stored === "light" || stored === "dark") return stored;
   } catch {
-    // No storage: follow the system.
+    // No storage: the default.
   }
-  return "system";
+  return DEFAULT;
 }
 
-/** The page's CSS switches on `data-theme`; with none it follows the system. */
+/** The page's CSS switches on `data-theme`; with none it is light. */
 function apply(choice: ThemeChoice): void {
-  const root = document.documentElement;
-  if (choice === "system") delete root.dataset.theme;
-  else root.dataset.theme = choice;
+  document.documentElement.dataset.theme = choice;
 }
 
 export function setThemeChoice(choice: ThemeChoice): void {
   try {
-    if (choice === "system") localStorage.removeItem(STORAGE);
-    else localStorage.setItem(STORAGE, choice);
+    localStorage.setItem(STORAGE, choice);
   } catch {
     // Not remembered; it still applies to this page.
   }
@@ -62,16 +60,10 @@ function subscribe(onChange: () => void) {
 }
 
 export function useThemeChoice(): ThemeChoice {
-  return useSyncExternalStore(subscribe, getThemeChoice, () => "system");
+  return useSyncExternalStore(subscribe, getThemeChoice, () => DEFAULT);
 }
 
-/** True when boards are drawn dark: chosen, or following a dark system. */
+/** True when boards are drawn dark. */
 export function useDarkTheme(): boolean {
-  const choice = useThemeChoice();
-  const systemDark = usePrefersDark();
-  return choice === "system" ? systemDark : choice === "dark";
+  return useThemeChoice() === "dark";
 }
-
-/** What the engine is told: null follows the system, as the CSS does. */
-export const engineScheme = (choice: ThemeChoice): ColorScheme | null =>
-  choice === "system" ? null : choice;

@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { MoonIcon, SunIcon } from "./icons";
 import { setThemeChoice, useDarkTheme } from "./theme";
 import { useEngineState } from "./useEngineState";
-import { usePrefersDark } from "./usePrefersDark";
 
 /**
  * Zoom out / current zoom (click to reset) / zoom in, the board menu, the
@@ -22,10 +21,7 @@ export function ZoomControls({
   const zoom = useEngineState(engine, (s) => s.camera.zoom, 1);
   const percent = Math.round(zoom * 100);
   const dark = useDarkTheme();
-  const systemDark = usePrefersDark();
-  // Switching back to what the system uses goes back to following it.
-  const toggleTheme = () =>
-    setThemeChoice(!dark === systemDark ? "system" : dark ? "light" : "dark");
+  const toggleTheme = () => setThemeChoice(dark ? "light" : "dark");
 
   return (
     <div className="panel zoom-controls" role="toolbar" aria-label="Zoom">
