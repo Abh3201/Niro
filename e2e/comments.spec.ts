@@ -1,5 +1,5 @@
 import { type Browser, expect, test } from "@playwright/test";
-import { drag, drawRectangle, openBoard, waitUntilLive } from "./helpers";
+import { drag, drawRectangle, openBoard, openMenu, waitUntilLive } from "./helpers";
 
 async function person(browser: Browser, name: string) {
   const context = await browser.newContext();
@@ -22,14 +22,14 @@ test("a comment pinned on a shape follows it, and others reply and resolve it", 
 
   // C, then a click on the shape: a box for the first message.
   await alice.page.keyboard.press("c");
-  await expect(alice.page.getByTestId("comment-add")).toHaveAttribute("aria-pressed", "true");
+  await expect(alice.page.getByTestId("comments-menu")).toHaveClass(/active/);
   await alice.page.mouse.click(400, 275);
   await alice.page.getByTestId("comment-text").fill("Why this color?");
   await alice.page.getByTestId("comment-send").click();
   const pin = alice.page.getByTestId("comment-pin");
   await expect(pin).toHaveCount(1);
   await expect(alice.page.getByTestId("comment-message")).toContainText("Why this color?");
-  await expect(alice.page.getByTestId("comment-add")).toHaveAttribute("aria-pressed", "false");
+  await expect(alice.page.getByTestId("comments-menu")).not.toHaveClass(/active/);
 
   // Move the shape: the pin goes with it.
   await alice.page.getByRole("button", { name: "Close", exact: true }).click();
@@ -61,9 +61,10 @@ test("a comment pinned on a shape follows it, and others reply and resolve it", 
   await expect(bobPin).toHaveAttribute("data-resolved", "true");
   await bob.page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(bob.page.getByTestId("comment-pin")).toHaveCount(0);
-  await expect(alice.page.getByTestId("comments-open")).toHaveText("Comments");
+  await expect(alice.page.getByTestId("comments-menu")).toHaveAttribute("aria-label", "Comments");
 
   // Still in the list, with resolved ones shown.
+  await openMenu(alice.page, "comments-menu");
   await alice.page.getByTestId("comments-open").click();
   await alice.page.getByTestId("comments-show-resolved").check();
   await expect(alice.page.getByTestId("comment-list-item")).toHaveCount(1);
@@ -91,7 +92,9 @@ test("someone with a view link sees comments but can't add them", async ({ brows
   await viewer.page.goto(`${alice.page.url().split("#")[0]}#k=${viewKey}`);
   await waitUntilLive(viewer.page);
   await expect(viewer.page.getByTestId("comment-pin")).toHaveCount(1);
+  await openMenu(viewer.page, "comments-menu");
   await expect(viewer.page.getByTestId("comment-add")).toBeDisabled();
+  await viewer.page.keyboard.press("Escape");
   await viewer.page.getByTestId("comment-pin").click();
   await expect(viewer.page.getByTestId("comment-message")).toContainText("Look here");
   await expect(viewer.page.getByTestId("comment-text")).toHaveCount(0);

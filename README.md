@@ -20,7 +20,7 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Undo, redo | Ctrl/Cmd + `Z`, Ctrl/Cmd + Shift + `Z` or Ctrl + `Y`, or the buttons under the toolbar |
 | Pan | Scroll, two-finger trackpad scroll, space + drag, middle-button drag, the hand tool, or one finger on empty space on a touch screen |
 | Zoom | Ctrl/Cmd + scroll, trackpad pinch, two-finger pinch on touch screens, or the buttons bottom-right. Ctrl/Cmd + `=`, `-`, `0` step in, out and back to 100% |
-| Export | `PNG` or `SVG` bottom-right downloads the selection, or the whole board when nothing is selected, in light colors on white |
+| Export | The `⋯` menu bottom-right (also Present and Version history) downloads the selection, or the whole board when nothing is selected, in light colors on white |
 | Keyboard | `Tab` / Shift + `Tab` step through shapes in reading order (frames, then what's in them), and past the last shape on to the rest of the page. `?` lists every shortcut. Screen readers announce the selected shape and can read a list of the board's shapes |
 | Add an image | The image button in the toolbar, paste one (Ctrl/Cmd + `V`), or drop a file on the board. PNG, JPEG, GIF or WebP; big pictures are shrunk to 2048 pixels. Resizing keeps its proportions; Shift lets them go |
 | React | Select shapes and pick an emoji in the panel at the top: 👍 ❤️ 😂 🎉 😮 👀. Everyone sees the counts under the shape; pick it again to take yours back |

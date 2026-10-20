@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
-import { drawRectangle, expectStatus, inkPixels, openBoard, waitUntilLive } from "./helpers";
+import {
+  drawRectangle,
+  expectStatus,
+  inkPixels,
+  openBoard,
+  openMenu,
+  waitUntilLive,
+} from "./helpers";
 
 test.beforeEach(async ({ page }) => {
   await openBoard(page);
@@ -149,6 +156,7 @@ test("formatting applies to a note's whole text, undoes, survives a reload and e
   await page.keyboard.press("Escape");
   await expectStatus(page, 1, 0);
 
+  await openMenu(page, "board-menu");
   const [file] = await Promise.all([
     page.waitForEvent("download"),
     page.getByTestId("export-svg").click(),
@@ -161,6 +169,9 @@ test("formatting applies to a note's whole text, undoes, survives a reload and e
   await waitUntilLive(page);
   await page.mouse.click(700, 440);
   await expectStatus(page, 1, 1);
+  // Shown the first time only; after that the bar opens from the selection bar.
+  await expect(page.getByTestId("text-bold")).toHaveCount(0);
+  await page.getByTestId("text-format-toggle").click();
   // Part bold, part not.
   await expect(page.getByTestId("text-bold")).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("text-valign-top")).toHaveAttribute("aria-pressed", "true");

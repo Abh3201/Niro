@@ -1,6 +1,8 @@
 import { type CommentThread, MAX_COMMENT_LENGTH } from "@niro/doc/comments";
 import { centerOn, type Engine, type EngineState, type Point, worldToScreen } from "@niro/engine";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { CommentIcon } from "./icons";
+import { MenuButton } from "./MenuButton";
 import type { OpenBoard } from "./open-board";
 import { loadIdentity, loadUserId } from "./presence";
 
@@ -478,8 +480,8 @@ export function useCommentKey(onPress: () => void) {
   }, [onPress]);
 }
 
-/** Bottom left: place a comment, and open the list of them. */
-export function CommentControls({
+/** In the tool bar: one button whose menu places a comment or opens the list of them. */
+export function CommentMenu({
   count,
   placing,
   canComment,
@@ -496,30 +498,48 @@ export function CommentControls({
   onList: () => void;
 }) {
   return (
-    <div className="panel comment-controls" role="toolbar" aria-label="Comments">
-      <button
-        type="button"
-        aria-pressed={placing}
-        disabled={!canComment}
-        title={
-          canComment
-            ? "Add a comment: click where it goes (C)"
-            : "Only people who can edit can add comments"
-        }
-        data-testid="comment-add"
-        onClick={onPlace}
-      >
-        Comment
-      </button>
-      <button
-        type="button"
-        aria-pressed={listOpen}
-        title="List the comments"
-        data-testid="comments-open"
-        onClick={onList}
-      >
-        {`Comments${count > 0 ? ` (${count})` : ""}`}
-      </button>
-    </div>
+    <MenuButton
+      label="Comments"
+      title="Comments (C adds one)"
+      icon={<CommentIcon />}
+      testId="comments-menu"
+      active={placing || listOpen}
+      badge={count}
+      side="right"
+    >
+      {(close) => (
+        <>
+          <button
+            type="button"
+            aria-pressed={placing}
+            disabled={!canComment}
+            title={
+              canComment
+                ? "Add a comment: click where it goes (C)"
+                : "Only people who can edit can add comments"
+            }
+            data-testid="comment-add"
+            onClick={() => {
+              onPlace();
+              close();
+            }}
+          >
+            Add comment<kbd>C</kbd>
+          </button>
+          <button
+            type="button"
+            aria-pressed={listOpen}
+            title="List the comments"
+            data-testid="comments-open"
+            onClick={() => {
+              onList();
+              close();
+            }}
+          >
+            {`All comments${count > 0 ? ` (${count})` : ""}`}
+          </button>
+        </>
+      )}
+    </MenuButton>
   );
 }

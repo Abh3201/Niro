@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
-import { drawRectangle, expectStatus, openBoard } from "./helpers";
+import { drawRectangle, expectStatus, openBoard, openMenu } from "./helpers";
 
 test.beforeEach(async ({ page }) => {
   await openBoard(page);
 });
 
 async function download(page: Page, format: "png" | "svg") {
+  await openMenu(page, "board-menu");
   const [file] = await Promise.all([
     page.waitForEvent("download"),
     page.getByTestId(`export-${format}`).click(),
@@ -33,7 +34,9 @@ function imageSize(page: Page, data: Buffer, type: string) {
 }
 
 test("exports the board, or the selection, as PNG and SVG", async ({ page }) => {
+  await openMenu(page, "board-menu");
   await expect(page.getByTestId("export-png")).toBeDisabled();
+  await page.keyboard.press("Escape");
   // Two 100 × 100 rectangles, 200 apart.
   await drawRectangle(page, { x: 200, y: 200 }, { x: 300, y: 300 });
   await drawRectangle(page, { x: 500, y: 200 }, { x: 600, y: 300 });
