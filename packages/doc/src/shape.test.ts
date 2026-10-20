@@ -22,6 +22,49 @@ describe("readShape", () => {
     expect(readShape("s1", valid)).toEqual({ id: "s1", ...valid });
   });
 
+  it("reads text formatting on shapes that take it, leaving out defaults and nonsense", () => {
+    const styled = {
+      ...valid,
+      font: "serif",
+      fontSize: 32,
+      bold: true,
+      italic: true,
+      underline: true,
+      strike: true,
+      align: "right",
+      valign: "top",
+      textColor: "blue",
+    };
+    expect(readShape("s1", styled)).toEqual({ id: "s1", ...styled });
+    const defaults = {
+      ...valid,
+      font: "sans",
+      fontSize: "auto",
+      bold: false,
+      align: "center",
+      valign: "middle",
+      textColor: "auto",
+    };
+    expect(readShape("s1", defaults)).toEqual({ id: "s1", ...valid });
+    expect(
+      readShape("s1", { ...valid, font: "papyrus", fontSize: Number.NaN, align: "justify" }),
+    ).toEqual({ id: "s1", ...valid });
+    expect(readShape("s1", { ...valid, fontSize: 1e9 })?.fontSize).toBe(400);
+    expect(readShape("s1", { ...valid, fontSize: -5 })?.fontSize).toBe(4);
+    // Text shapes align left unless told, and have no vertical alignment or text color.
+    const text = readShape("s1", { ...styled, type: "text", align: "left" });
+    expect(text).not.toHaveProperty("align");
+    expect(text).not.toHaveProperty("valign");
+    expect(text).not.toHaveProperty("textColor");
+    expect(text).toMatchObject({ font: "serif", fontSize: 32, bold: true });
+    // Frames' names and lines take none of it.
+    for (const type of ["frame", "line"]) {
+      const read = readShape("s1", { ...styled, type });
+      for (const key of ["font", "fontSize", "bold", "align", "valign", "textColor"])
+        expect(read).not.toHaveProperty(key);
+    }
+  });
+
   it("reads locks and line styles, leaving out defaults", () => {
     expect(readShape("s1", { ...valid, locked: true })).toMatchObject({ locked: true });
     expect(readShape("s1", { ...valid, locked: false })).not.toHaveProperty("locked");

@@ -9,8 +9,8 @@ export interface PaintOptions {
   readonly palette: Palette;
   /** Screen pixels per world unit, for leaving out what's too small to see. */
   readonly zoom: number;
-  /** `FontMetrics.baseline`. */
-  readonly baseline: number;
+  /** `FontMetrics.baseline`: where lines in a font put their baseline. */
+  baseline(font: string): number;
   /** The text to draw on a shape, laid out; none for a shape whose text isn't shown. */
   textLayout(shape: Shape): TextLayout | undefined;
   /** A freehand stroke's outline. */
@@ -28,7 +28,7 @@ export function paintShapes(
   list: readonly Shape[],
   options: PaintOptions,
 ): number {
-  const { scene, palette, zoom, baseline } = options;
+  const { scene, palette, zoom } = options;
   // Shapes in frames are cut off at each frame's edges. Shapes in the
   // same frames share one list, so the clip changes only between frames.
   let clipped: readonly ShapeId[] = [];
@@ -49,7 +49,7 @@ export function paintShapes(
       clipped = frames;
     }
     const layout = options.textLayout(shape);
-    const text = layout && { layout, baseline, zoom };
+    const text = layout && { layout, baseline: options.baseline(layout.font), zoom };
     const stroke = shape.type === "freehand" ? options.stroke(shape) : undefined;
     const image = shape.type === "image" ? options.image?.(shape) : undefined;
     drawShape(ctx, shape, palette, zoom, {

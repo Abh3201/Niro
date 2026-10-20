@@ -63,7 +63,12 @@ import {
   reparentOnMove,
   sharedColor,
   sharedLineStyle,
+  sharedTextStyle,
   styleTargets,
+  type TextStyle,
+  type TextStylePatch,
+  textStylePatch,
+  textStyleTargets,
   ungroup,
   withDescendants,
 } from "./structure";
@@ -98,6 +103,11 @@ export interface EngineState {
    * differs), or null unless every selected shape is a line or an arrow.
    */
   readonly selectionLine: LineStyle | null;
+  /**
+   * The text formatting the selection shares, per property (null where it
+   * differs), or null unless every selected shape's text can be formatted.
+   */
+  readonly selectionText: TextStyle | null;
   /** Two or more shapes are selected, so they can be grouped. */
   readonly canGroup: boolean;
   /** A group is selected, so it can be taken apart. */
@@ -211,6 +221,13 @@ export interface Engine {
     head?: LineHead;
     route?: LineRoute;
   }): void;
+  /**
+   * Formats the text of the selected shapes, all of each one's text: font,
+   * size, bold and so on. Shapes whose text can't be formatted are left alone.
+   */
+  setTextStyle(style: TextStylePatch): void;
+  /** Turns bold, italic, underline or strikethrough on for the selection, or off when all of it has it. */
+  toggleTextStyle(style: "bold" | "italic" | "underline" | "strike"): void;
   reorderSelection(direction: ReorderDirection): void;
   /** Puts the selected shapes in a group, and selects it. */
   groupSelection(): void;
@@ -406,6 +423,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     selectionColor: null,
     selectionLocked: false,
     selectionLine: null,
+    selectionText: null,
     canGroup: false,
     canUngroup: false,
     shapeCount: scene.size,
@@ -530,6 +548,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     selectionColor: sharedColor(scene, ids),
     selectionLocked: hasLocked(scene, ids),
     selectionLine: sharedLineStyle(scene, ids),
+    selectionText: sharedTextStyle(scene, ids),
     canGroup: outermost(scene, ids).length >= 2,
     canUngroup: ids.some((id) => scene.get(id)?.type === "group"),
     selectionLabel: ids.length === 1 ? describeShape(scene, ids[0] as ShapeId) : "",
@@ -582,6 +601,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     },
     undo: () => undo(),
     redo: () => redo(),
+    toggleTextStyle: (style) => toggleTextStyle(style),
   });
 
   const shapeList = new ShapeList(container, scene);
@@ -693,7 +713,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         scene,
         palette: theme.palette,
         zoom: camera.zoom,
-        baseline: fonts.baseline,
+        baseline: (font) => fonts.baseline(font),
         // The editor shows the text of the shape being edited.
         textLayout: (shape) => (shape.id === editing ? undefined : textLayout(shape)),
         stroke: (shape) => strokes.get(shape),
@@ -1089,6 +1109,29 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     if (route) arrowRoute = route;
   };
 
+  const setTextStyle = (style: TextStylePatch) => {
+    if (hasLocked(scene, state.selection)) return;
+    const targets = textStyleTargets(scene, state.selection);
+    if (targets.length === 0) return;
+    command((tx) => {
+      for (const shape of targets) {
+        const patch = textStylePatch(shape, style);
+        // A text shape grows or shrinks to hold its text in the new size and font.
+        const fitted =
+          shape.type === "text"
+            ? withHeight({ ...shape, ...patch }, layouts.fittedHeight({ ...shape, ...patch }))
+            : null;
+        tx.update(shape.id, { ...patch, ...fitted });
+      }
+    });
+  };
+
+  function toggleTextStyle(style: "bold" | "italic" | "underline" | "strike") {
+    const targets = textStyleTargets(scene, state.selection);
+    if (targets.length === 0) return;
+    setTextStyle({ [style]: !targets.every((s) => s[style] === true) });
+  }
+
   const reorderSelection = (direction: ReorderDirection) => {
     if (state.selection.length === 0 || hasLocked(scene, state.selection)) return;
     const keys = reorder(scene, state.selection, direction);
@@ -1439,6 +1482,12 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       else if (key === "a") selectAll();
       else if (key === "d") duplicateSelection();
       else if (key === "g") event.shiftKey ? ungroupSelection() : groupSelection();
+      else if (
+        (key === "b" || key === "i" || key === "u") &&
+        !event.shiftKey &&
+        state.selectionText
+      )
+        toggleTextStyle(key === "b" ? "bold" : key === "i" ? "italic" : "underline");
       else return false;
       return true;
     }
@@ -1555,6 +1604,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setSelectionColor,
     toggleLock,
     setLineStyle,
+    setTextStyle,
+    toggleTextStyle,
     reorderSelection,
     groupSelection,
     ungroupSelection,
@@ -1584,7 +1635,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         ids: state.selection.length > 0 ? state.selection : null,
         palette: LIGHT_PALETTE,
         background: EXPORT_BACKGROUND,
-        baseline: fonts.baseline,
+        baseline: (font: string) => fonts.baseline(font),
         textLayout,
         stroke: (shape: Shape) => strokes.get(shape),
         image: imageOf,

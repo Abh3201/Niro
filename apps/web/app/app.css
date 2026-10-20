@@ -129,8 +129,38 @@ body {
   transform: translateX(-50%);
 }
 
-.line-panel {
+.line-panel,
+.text-panel {
   top: 64px;
+}
+
+.text-panel select {
+  height: 36px;
+  padding: 0 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  background: var(--panel-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+
+.text-panel select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.panel .text-toggle {
+  font-size: 16px;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.panel .swatch-auto {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--panel-bg);
 }
 
 .line-style {

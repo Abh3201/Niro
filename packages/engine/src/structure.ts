@@ -1,7 +1,11 @@
 import {
   type ColorName,
   DEFAULT_COLOR,
+  defaultAlign,
   defaultHead,
+  type FontName,
+  type FontSize,
+  hasTextColor,
   indexesAbove,
   indexesBelow,
   indexesBetween,
@@ -16,7 +20,11 @@ import {
   type Shape,
   type ShapeId,
   type ShapePatch,
+  type TextAlign,
+  type TextColor,
   type Tx,
+  takesTextStyle,
+  type VerticalAlign,
 } from "@niro/doc";
 import { asDrawn, detachUnless } from "./arrows";
 import { type Box, boxContainsBox, boxesIntersect, type Point, unionBoxes } from "./geometry";
@@ -160,6 +168,82 @@ export function sharedLineStyle(scene: Scene, ids: Iterable<ShapeId>): LineStyle
     head: common((s) => s.head ?? defaultHead(s.type)),
     route: targets.every((s) => s.type === "arrow") ? common((s) => s.route ?? "straight") : null,
     routable: targets.every((s) => s.type === "arrow"),
+  };
+}
+
+/** Text formatting, as `Engine.setTextStyle` takes it. */
+export interface TextStylePatch {
+  readonly font?: FontName;
+  readonly fontSize?: FontSize;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly strike?: boolean;
+  readonly align?: TextAlign;
+  /** Boxes only. */
+  readonly valign?: VerticalAlign;
+  /** For boxes, their text color; for text shapes, their color (unless "auto"). */
+  readonly textColor?: TextColor;
+}
+
+/** The text formatting a selection shares, per property; null where it differs. */
+export interface TextStyle {
+  readonly font: FontName | null;
+  readonly fontSize: FontSize | null;
+  readonly bold: boolean | null;
+  readonly italic: boolean | null;
+  readonly underline: boolean | null;
+  readonly strike: boolean | null;
+  readonly align: TextAlign | null;
+  /** Null too when nothing selected is a box. */
+  readonly valign: VerticalAlign | null;
+  readonly textColor: TextColor | null;
+  /** Something is a box (not a text shape), so vertical alignment applies. */
+  readonly boxes: boolean;
+}
+
+/** The shapes among `ids` (groups standing for what's in them) whose text formatting can change. */
+export function textStyleTargets(scene: Scene, ids: Iterable<ShapeId>): Shape[] {
+  return shapesOf(scene, styleTargets(scene, ids)).filter((s) => takesTextStyle(s.type));
+}
+
+/**
+ * The shared text formatting of the selection, or null unless every shape
+ * a style change would touch takes text formatting.
+ */
+export function sharedTextStyle(scene: Scene, ids: Iterable<ShapeId>): TextStyle | null {
+  const all = styleTargets(scene, ids);
+  const targets = textStyleTargets(scene, all);
+  if (targets.length === 0 || targets.length !== all.length) return null;
+  const common = <T>(list: readonly Shape[], value: (s: Shape) => T): T | null => {
+    if (list.length === 0) return null;
+    const first = value(list[0] as Shape);
+    return list.every((s) => value(s) === first) ? first : null;
+  };
+  const boxes = targets.filter((s) => hasTextColor(s.type));
+  return {
+    font: common(targets, (s) => s.font ?? "sans"),
+    fontSize: common(targets, (s) => s.fontSize ?? "auto"),
+    bold: common(targets, (s) => s.bold === true),
+    italic: common(targets, (s) => s.italic === true),
+    underline: common(targets, (s) => s.underline === true),
+    strike: common(targets, (s) => s.strike === true),
+    align: common(targets, (s) => s.align ?? defaultAlign(s.type)),
+    valign: common(boxes, (s) => s.valign ?? "middle"),
+    textColor: common(targets, (s) => (hasTextColor(s.type) ? (s.textColor ?? "auto") : s.color)),
+    boxes: boxes.length > 0,
+  };
+}
+
+/** The change `style` makes to `shape`'s fields (before a text shape's height is refitted). */
+export function textStylePatch(shape: Shape, style: TextStylePatch): ShapePatch {
+  const { valign, textColor, ...rest } = style;
+  const box = hasTextColor(shape.type);
+  return {
+    ...rest,
+    ...(box && valign !== undefined && { valign }),
+    ...(textColor !== undefined &&
+      (box ? { textColor } : textColor !== "auto" && { color: textColor })),
   };
 }
 

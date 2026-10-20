@@ -14,13 +14,19 @@ export {
   reorderToEnd,
 } from "./order";
 export {
+  ALIGNS,
   ASSET_ID,
   COLORS,
   type ColorName,
   DASHES,
   DEFAULT_COLOR,
+  defaultAlign,
   defaultHead,
+  FONTS,
+  type FontName,
+  type FontSize,
   HEADS,
+  hasTextColor,
   holdsText,
   isContainer,
   isLinear,
@@ -28,6 +34,8 @@ export {
   type LineHead,
   type LineRoute,
   type LineThickness,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
   MIN_SIZE,
   newShapeId,
   normalizeAngle,
@@ -46,8 +54,13 @@ export {
   type ShapeId,
   type ShapePatch,
   type ShapeType,
+  type TextAlign,
+  type TextColor,
   THICKNESSES,
+  takesTextStyle,
   USER_ID,
+  VALIGNS,
+  type VerticalAlign,
 } from "./shape";
 export type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
 export { effectiveParents } from "./tree";

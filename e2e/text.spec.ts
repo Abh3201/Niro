@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { drawRectangle, expectStatus, inkPixels, openBoard, waitUntilLive } from "./helpers";
 
@@ -111,4 +112,54 @@ test("long text stays inside its shape, while it's edited and after", async ({ p
   // Nothing drawn past the shape's edges.
   expect(await inkPixels(page, { x: 742, y: 200, width: 60, height: 320 }, "drawn")).toBe(0);
   expect(await inkPixels(page, { x: 440, y: 200, width: 58, height: 320 }, "drawn")).toBe(0);
+});
+
+test("formatting applies to a note's whole text, undoes, survives a reload and exports", async ({
+  page,
+}) => {
+  await page.keyboard.press("n");
+  await page.mouse.click(640, 360);
+  await page.keyboard.type("Hello");
+  await page.keyboard.press("Escape");
+  await expectStatus(page, 1, 1);
+  const top = { x: 550, y: 270, width: 180, height: 50 };
+  const bottom = { x: 550, y: 400, width: 180, height: 50 };
+
+  await page.getByTestId("text-valign-top").click();
+  await expect.poll(() => inkPixels(page, top)).toBeGreaterThan(50);
+  expect(await inkPixels(page, bottom)).toBe(0);
+
+  // Red text isn't dark ink; undo brings the dark text back.
+  await page.getByTestId("text-color-red").click();
+  await expect.poll(() => inkPixels(page, top)).toBeLessThan(5);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => inkPixels(page, top)).toBeGreaterThan(50);
+
+  // Ctrl + B while typing makes the whole note bold, and typing carries on.
+  await page.keyboard.press("Enter");
+  const editor = page.getByTestId("text-editor");
+  await expect(editor).toBeFocused();
+  await page.keyboard.press("Control+b");
+  await expect(page.getByTestId("text-bold")).toHaveAttribute("aria-pressed", "true");
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveCSS("font-weight", "700");
+  await page.keyboard.type("!");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expectStatus(page, 1, 0);
+
+  const [file] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByTestId("export-svg").click(),
+  ]);
+  const svg = await readFile(await file.path(), "utf8");
+  expect(svg).toContain("bold 100px");
+  expect(svg).toContain("Hello!");
+
+  await page.reload();
+  await waitUntilLive(page);
+  await page.mouse.click(700, 440);
+  await expectStatus(page, 1, 1);
+  await expect(page.getByTestId("text-bold")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("text-valign-top")).toHaveAttribute("aria-pressed", "true");
 });

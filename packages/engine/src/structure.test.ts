@@ -20,8 +20,10 @@ import {
   selectableUnit,
   sharedColor,
   sharedLineStyle,
+  sharedTextStyle,
   stepInto,
   styleTargets,
+  textStylePatch,
   ungroup,
 } from "./structure";
 import { memoryDoc } from "./test-doc";
@@ -471,5 +473,45 @@ describe("ink on sticky notes", () => {
     expect(noteFor(loose.scene, { ...pic, parentId: null }, new Set([id("pic")]))).toBe("note");
     // Rectangles never join a note.
     expect(noteFor(loose.scene, { ...pic, type: "rectangle" })).toBeNull();
+  });
+});
+
+describe("text formatting", () => {
+  it("shares what every shape has, and only when every shape takes formatting", () => {
+    const { scene } = board([
+      box("a", 0, 0, 10, 10, { type: "sticky", bold: true, font: "serif" }),
+      box("b", 20, 0, 10, 10, { type: "text", bold: true, color: "red" }),
+      box("l", 40, 0, 10, 10, { type: "line" }),
+    ]);
+    const style = sharedTextStyle(scene, [id("a"), id("b")]);
+    expect(style).toMatchObject({
+      bold: true,
+      italic: false,
+      font: null,
+      fontSize: "auto",
+      align: null,
+      valign: "middle",
+      boxes: true,
+    });
+    expect(sharedTextStyle(scene, [id("b")])).toMatchObject({
+      valign: null,
+      boxes: false,
+      textColor: "red",
+    });
+    expect(sharedTextStyle(scene, [id("a"), id("l")])).toBeNull();
+  });
+
+  it("writes a box's text color, and a text shape's color", () => {
+    const note = box("a", 0, 0, 10, 10, { type: "sticky" });
+    const text = box("b", 0, 0, 10, 10, { type: "text" });
+    expect(textStylePatch(note, { textColor: "red", valign: "top" })).toEqual({
+      textColor: "red",
+      valign: "top",
+    });
+    expect(textStylePatch(text, { textColor: "red", valign: "top", bold: true })).toEqual({
+      color: "red",
+      bold: true,
+    });
+    expect(textStylePatch(text, { textColor: "auto" })).toEqual({});
   });
 });

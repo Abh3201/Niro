@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { LIGHT_PALETTE } from "./render";
 import { shapeOutline } from "./shapes";
 import {
+  cssFont,
+  DEFAULT_FONT,
   fittedTextHeight,
   inkColor,
   layoutText,
@@ -197,5 +199,82 @@ describe("TextLayouts", () => {
     const first = measured;
     for (const s of board) layouts.get(s);
     expect(measured).toBe(first);
+  });
+});
+
+describe("formatted text", () => {
+  /** Plain text one unit per character; any other font twice as wide. */
+  const styled = (s: string, font?: string) =>
+    !font || font === DEFAULT_FONT ? s.length : s.length * 2;
+
+  it("measures in the shape's font, bold and italic included", () => {
+    expect(cssFont(shape({}))).toBe(DEFAULT_FONT);
+    expect(cssFont(shape({ bold: true, italic: true, font: "serif" }))).toMatch(
+      /^italic bold 100px Georgia/,
+    );
+    // Frames' names are never formatted.
+    expect(cssFont(shape({ type: "frame", bold: true }))).toBe(DEFAULT_FONT);
+    const plain = shape({ type: "text", w: 100, h: 30, text: "aaaa aaaa" });
+    // At 24, "aaaa" is 96 plain and 192 bold: plain fits one word a line, bold breaks the words.
+    expect(layoutText(plain, styled).lines).toEqual(["aaaa", "aaaa"]);
+    const bold = layoutText({ ...plain, bold: true }, styled);
+    expect(bold.font).toBe(cssFont({ ...plain, bold: true }));
+    expect(bold.lines.length).toBeGreaterThan(2);
+  });
+
+  it("sets a text shape at its size, and fits its height to it", () => {
+    const big = shape({ type: "text", w: 1000, h: 30, text: "hi", fontSize: 48 });
+    expect(layoutText(big, measure).fontSize).toBe(48);
+    expect(fittedTextHeight(big, measure)).toBe(textHeight(1, 48));
+    expect(fittedTextHeight({ ...big, fontSize: "auto" }, measure)).toBe(
+      textHeight(1, TEXT_FONT_SIZE),
+    );
+  });
+
+  it("uses a box's size as its largest, still shrinking text that doesn't fit", () => {
+    expect(layoutText(shape({ text: "hi", fontSize: 20 }), measure).fontSize).toBe(20);
+    const long = layoutText(shape({ text: "word ".repeat(80), fontSize: 64 }), measure);
+    expect(long.fontSize).toBeLessThan(64);
+  });
+
+  it("aligns across and down", () => {
+    const top = layoutText(shape({ text: "hi", valign: "top", align: "right" }), measure);
+    const middle = layoutText(shape({ text: "hi" }), measure);
+    const bottom = layoutText(shape({ text: "hi", valign: "bottom" }), measure);
+    expect(top.align).toBe("right");
+    expect(middle.align).toBe("center");
+    // A 200 square note has 16 of padding each side.
+    expect(top.y).toBeCloseTo(-84);
+    expect(middle.y).toBeCloseTo(-textHeight(1, middle.fontSize) / 2);
+    expect(bottom.y + textHeight(1, bottom.fontSize)).toBeCloseTo(84);
+  });
+
+  it("lays a shape out again when its formatting changes", () => {
+    let calls = 0;
+    const layouts = new TextLayouts((s, font) => {
+      calls++;
+      return styled(s, font);
+    });
+    const note = shape({ text: "hello" });
+    layouts.get(note);
+    const before = calls;
+    layouts.get(note);
+    expect(calls).toBe(before);
+    for (const patch of [
+      { bold: true },
+      { fontSize: 20 },
+      { align: "left" as const },
+      { valign: "top" as const },
+    ]) {
+      layouts.get({ ...note, ...patch });
+      expect(calls).toBeGreaterThan(before);
+    }
+  });
+
+  it("draws a set text color, on a note's paper as on a light board", () => {
+    expect(inkColor(shape({ textColor: "red" }), LIGHT_PALETTE)).toBe(LIGHT_PALETTE.solid.red);
+    const dark = { ...LIGHT_PALETTE, solid: { ...LIGHT_PALETTE.solid, black: "#eeeeee" } };
+    expect(inkColor(shape({ textColor: "black" }), dark)).toBe(LIGHT_PALETTE.ink.black);
+    expect(inkColor(shape({ type: "rectangle", textColor: "black" }), dark)).toBe("#eeeeee");
   });
 });

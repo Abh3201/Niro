@@ -12,8 +12,10 @@ import { isValidIndex } from "./order";
  * 6: locked shapes, and line styles (dashes, thickness, arrowheads).
  * 7: pen strokes can belong to the sticky note they were drawn on.
  * 8: arrows can be routed with right angles (elbow arrows).
+ * 9: text formatting: font, size, bold, italic, underline, strikethrough,
+ *    alignment and text color, per shape.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
@@ -44,6 +46,50 @@ export function holdsText(type: ShapeType): boolean {
     type === "frame"
   );
 }
+
+/**
+ * Shapes whose text can be formatted (font, size, alignment and so on):
+ * those that hold text, except frames, whose name is always set the same.
+ */
+export function takesTextStyle(type: ShapeType): boolean {
+  return type === "rectangle" || type === "ellipse" || type === "sticky" || type === "text";
+}
+
+/** Text shapes are set in the shape's own color; boxes have a text color of their own. */
+export function hasTextColor(type: ShapeType): boolean {
+  return type === "rectangle" || type === "ellipse" || type === "sticky";
+}
+
+/**
+ * Typefaces, by name. Each is a list of fonts already on people's
+ * computers (no web fonts to download), so text measures the same before
+ * and after a font arrives, and exports need nothing embedded. Absent means
+ * sans, the system's own font.
+ */
+export const FONTS = ["sans", "serif", "mono", "hand"] as const;
+export type FontName = (typeof FONTS)[number];
+
+/** Smallest and largest font size that can be set, in world units. */
+export const MIN_FONT_SIZE = 4;
+export const MAX_FONT_SIZE = 400;
+/**
+ * A text's font size: a number of world units, or `"auto"`, the default
+ * (a text shape's usual 24, a box's text shrinking to fit). In a box, a
+ * number is the largest size: text that doesn't fit still shrinks.
+ */
+export type FontSize = number | "auto";
+
+/** How lines sit across the text's box. Absent means left for text shapes, center for the rest. */
+export const ALIGNS = ["left", "center", "right"] as const;
+export type TextAlign = (typeof ALIGNS)[number];
+export const defaultAlign = (type: ShapeType): TextAlign => (type === "text" ? "left" : "center");
+
+/** Where a box's text sits, top to bottom. Absent means middle. Text shapes grow to fit, so have none. */
+export const VALIGNS = ["top", "middle", "bottom"] as const;
+export type VerticalAlign = (typeof VALIGNS)[number];
+
+/** A box's text color: a color name, or `"auto"`, the default (dark or white, whichever reads on the fill). */
+export type TextColor = ColorName | "auto";
 
 /**
  * Groups, frames and sticky notes: the shapes other shapes can belong to,
@@ -239,6 +285,22 @@ export interface Shape {
   readonly head?: LineHead;
   /** Arrows only; present only when elbow. The path is worked out wherever the arrow is drawn, never stored. */
   readonly route?: LineRoute;
+  /**
+   * Text formatting, for the whole of a shape's text (`takesTextStyle`
+   * shapes only). Each is present only when not the default: sans, auto
+   * size, not bold and so on, the type's usual alignment, middle, auto color.
+   */
+  readonly font?: FontName;
+  readonly fontSize?: FontSize;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly strike?: boolean;
+  readonly align?: TextAlign;
+  /** Boxes only (not text shapes). */
+  readonly valign?: VerticalAlign;
+  /** Boxes only: a text shape's text is in its `color`. */
+  readonly textColor?: TextColor;
 }
 
 /** Fields `Tx.update` can set. Text changes go through `Tx.editText`, reactions through `Tx.react`; points and assets never change. */
@@ -305,6 +367,17 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const thickness = isLine ? oneOf(THICKNESSES, raw.thickness) : undefined;
   const head = isLine ? oneOf(HEADS, raw.head) : undefined;
   const route = isArrow ? oneOf(ROUTES, raw.route) : undefined;
+  const styled = takesTextStyle(shapeType);
+  const boxed = hasTextColor(shapeType);
+  const font = styled ? oneOf(FONTS, raw.font) : undefined;
+  const fontSize =
+    styled && typeof raw.fontSize === "number" && Number.isFinite(raw.fontSize)
+      ? Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, raw.fontSize))
+      : undefined;
+  const align = styled ? oneOf(ALIGNS, raw.align) : undefined;
+  const valign = boxed ? oneOf(VALIGNS, raw.valign) : undefined;
+  const textColor = boxed ? oneOf(COLORS, raw.textColor) : undefined;
+  const flag = (value: unknown) => styled && value === true;
 
   return {
     id: id as ShapeId,
@@ -333,6 +406,15 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     ...(thickness && thickness !== "medium" && { thickness }),
     ...(head && head !== defaultHead(shapeType) && { head }),
     ...(route && route !== "straight" && { route }),
+    ...(font && font !== "sans" && { font }),
+    ...(fontSize !== undefined && { fontSize }),
+    ...(flag(raw.bold) && { bold: true }),
+    ...(flag(raw.italic) && { italic: true }),
+    ...(flag(raw.underline) && { underline: true }),
+    ...(flag(raw.strike) && { strike: true }),
+    ...(align && align !== defaultAlign(shapeType) && { align }),
+    ...(valign && valign !== "middle" && { valign }),
+    ...(textColor && { textColor }),
   };
 }
 

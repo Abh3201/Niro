@@ -33,6 +33,7 @@ const SECTIONS: ReadonlyArray<{ title: string; rows: ReadonlyArray<[string, stri
       [`${MOD} + D`, "Duplicate"],
       [`${MOD} + G`, "Group"],
       [`${MOD} + Shift + G`, "Ungroup"],
+      [`${MOD} + B / I / U`, "Bold / italic / underline the text (also while typing)"],
       ["] / [", "Bring forward / send backward"],
       ["Shift + ] / [", "Bring to front / send to back"],
     ],
