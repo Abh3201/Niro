@@ -22,6 +22,7 @@ The first release: a whiteboard you can run yourself and share by link.
 - Search: Ctrl/⌘ + F finds text in notes, shapes, text and frame names, outlines every match and steps through them with Enter.
 - Minimap: the whole board drawn small in the corner, with the part on screen outlined; click or drag it to move there, or hide it (the choice is remembered).
 - Presentation mode: the Present button (Shift Alt P) steps through the frames in reading order with the arrow keys, Page Up and Down or the on-screen buttons. Others see who is presenting and can follow with one click.
+- Elbow arrows: switch an arrow to an elbow in the selection panel and it runs in right angles around the shapes it joins, following them as they move. Boards use schema 8.
 - Emoji reactions on any shape, shown under it for everyone.
 - Pan and zoom with a mouse, a trackpad or touch.
 - Export the selection or the whole board as PNG or SVG.

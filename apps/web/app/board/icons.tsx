@@ -230,3 +230,14 @@ export const MapIcon = () => (
     <path d="M7 4v10M13 6v10" />
   </Icon>
 );
+
+/** A straight or an elbowed arrow, for the route buttons. */
+export const RouteSampleIcon = ({ route }: { route: "straight" | "elbow" }) => (
+  <Icon>
+    {route === "straight" ? (
+      <path d="M4 15L16 5M12.5 5H16v3.5" />
+    ) : (
+      <path d="M4 15h6V5h6M13 2.5L16 5l-3 2.5" />
+    )}
+  </Icon>
+);

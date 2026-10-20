@@ -6,6 +6,7 @@ import {
   isLinear,
   type LineDash,
   type LineHead,
+  type LineRoute,
   type LineThickness,
   newShapeId,
   REACTION_NAMES,
@@ -203,7 +204,12 @@ export interface Engine {
   /** Locks the selected shapes, or unlocks them when something selected is locked. */
   toggleLock(): void;
   /** Changes how the selected lines and arrows are drawn. Other shapes are left alone. */
-  setLineStyle(style: { dash?: LineDash; thickness?: LineThickness; head?: LineHead }): void;
+  setLineStyle(style: {
+    dash?: LineDash;
+    thickness?: LineThickness;
+    head?: LineHead;
+    route?: LineRoute;
+  }): void;
   reorderSelection(direction: ReorderDirection): void;
   /** Puts the selected shapes in a group, and selects it. */
   groupSelection(): void;
@@ -414,6 +420,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   let pendingWrite: (() => void) | null = null;
   const listeners = new Set<() => void>();
   let peers: readonly RemotePeer[] = [];
+  /** How new arrows are routed: the last choice made, for this session. */
+  let arrowRoute: LineRoute = "straight";
   /** The minimap's view of the board; null once something changed. */
   let overviewCache: Overview | null = null;
   /** Search results outlined on the board. */
@@ -631,6 +639,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     },
     fittedHeight: (shape) => layouts.fittedHeight(shape),
     laser,
+    arrowRoute: () => arrowRoute,
   };
   const interaction = new Interaction(host);
 
@@ -1043,19 +1052,32 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     });
   };
 
-  const setLineStyle = (style: { dash?: LineDash; thickness?: LineThickness; head?: LineHead }) => {
+  const setLineStyle = (style: {
+    dash?: LineDash;
+    thickness?: LineThickness;
+    head?: LineHead;
+    route?: LineRoute;
+  }) => {
     if (hasLocked(scene, state.selection)) return;
     const ids = styleTargets(scene, state.selection).filter((id) =>
       isLinear(scene.get(id)?.type ?? "rectangle"),
     );
     if (ids.length === 0) return;
+    const { route, ...rest } = style;
     command((tx) => {
       for (const id of ids) {
         const shape = scene.get(id);
-        // An arrow is drawn where it is, not where it's stored: write both ends as drawn.
-        if (shape) tx.update(id, { ...asDrawn(shape), ...style });
+        if (!shape) continue;
+        // Only arrows are routed. An arrow is drawn where it is, not where it's stored: write both ends as drawn.
+        tx.update(id, {
+          ...asDrawn(shape),
+          ...rest,
+          ...(route && shape.type === "arrow" && { route }),
+        });
       }
     });
+    // The next arrow drawn is routed the way this one was.
+    if (route) arrowRoute = route;
   };
 
   const reorderSelection = (direction: ReorderDirection) => {

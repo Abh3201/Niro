@@ -43,6 +43,30 @@ test("an arrow stays attached to the shapes it connects as they move", async ({ 
     .toBeGreaterThan(20);
 });
 
+test("an arrow can be switched to an elbow that runs in right angles", async ({ page }) => {
+  await drawRectangle(page, { x: 200, y: 200 }, { x: 300, y: 300 });
+  await drawRectangle(page, { x: 500, y: 400 }, { x: 600, y: 500 });
+  await page.keyboard.press("a");
+  await drag(page, { x: 250, y: 250 }, { x: 550, y: 450 });
+  await expectStatus(page, 3, 1);
+  // Straight: ink on the diagonal, none along the box's right side row.
+  const diagonal = { x: 365, y: 323, width: 20, height: 20 };
+  const horizontal = { x: 320, y: 244, width: 40, height: 12 };
+  await expect.poll(() => inkPixels(page, diagonal)).toBeGreaterThan(20);
+  expect(await inkPixels(page, horizontal)).toBe(0);
+
+  await page.getByTestId("route-elbow").click();
+  await expect(page.getByTestId("route-elbow")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => inkPixels(page, diagonal)).toBe(0);
+  await expect.poll(() => inkPixels(page, horizontal)).toBeGreaterThan(100);
+
+  // It follows the shapes it joins, still in right angles.
+  await page.mouse.click(900, 650);
+  await drag(page, { x: 560, y: 410 }, { x: 660, y: 410 });
+  await expectStatus(page, 3, 1);
+  await expect.poll(() => inkPixels(page, horizontal)).toBeGreaterThan(100);
+});
+
 test.describe("with a pen on a touch screen", () => {
   test.use({ hasTouch: true });
 
