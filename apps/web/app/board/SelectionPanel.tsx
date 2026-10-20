@@ -311,8 +311,10 @@ const keepFocus = (event: MouseEvent) => event.preventDefault();
 
 /**
  * Font, size, bold, italic, underline, strikethrough, alignment and text
- * color for the selected shapes' text. Each applies to all of a shape's
- * text, not to selected words.
+ * color. For selected shapes, each applies to all of their text; while
+ * typing, to the selected words (alignment: to their paragraphs), or with
+ * nothing selected, to what's typed next. The panel keeps the editor open
+ * (`data-keeps-editor`): its dropdowns take focus, and give it back.
  */
 function TextPanel({
   engine,
@@ -334,7 +336,12 @@ function TextPanel({
     { style: "strike", label: "Strikethrough", key: "", glyph: <s>S</s> },
   ] as const;
   return (
-    <div className="panel selection-panel text-panel" role="toolbar" aria-label="Text">
+    <div
+      className="panel selection-panel text-panel"
+      role="toolbar"
+      aria-label="Text"
+      data-keeps-editor=""
+    >
       <select
         aria-label="Font"
         title="Font"

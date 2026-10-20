@@ -1,4 +1,13 @@
-import type { DocStore, Origin, Shape, ShapeChange, ShapeId, Tx } from "@niro/doc";
+import {
+  type DocStore,
+  editRuns,
+  formatRuns,
+  type Origin,
+  type Shape,
+  type ShapeChange,
+  type ShapeId,
+  type Tx,
+} from "@niro/doc";
 
 /**
  * A minimal in-memory DocStore for tests, starting with `initial`: the
@@ -28,14 +37,28 @@ export function memoryDoc(initial: readonly Shape[] = []): DocStore {
           shapes.set(id, shape);
           changes.push({ kind: "updated", shape, previous });
         },
-        editText(id, index, deleteCount, insert) {
+        editText(id, index, deleteCount, insert, marks) {
           const previous = shapes.get(id);
           if (!previous) return;
-          const text = previous.text;
-          const shape = {
-            ...previous,
-            text: text.slice(0, index) + insert + text.slice(index + deleteCount),
-          };
+          const { text, runs } = editRuns(
+            previous.text,
+            previous.textRuns,
+            index,
+            deleteCount,
+            insert,
+            marks,
+          );
+          const { textRuns: _, ...rest } = previous;
+          const shape: Shape = { ...rest, text, ...(runs && { textRuns: runs }) };
+          shapes.set(id, shape);
+          changes.push({ kind: "updated", shape, previous });
+        },
+        formatText(id, index, length, patch) {
+          const previous = shapes.get(id);
+          if (!previous) return;
+          const runs = formatRuns(previous.text, previous.textRuns, index, length, patch);
+          const { textRuns: _, ...rest } = previous;
+          const shape: Shape = { ...rest, ...(runs && { textRuns: runs }) };
           shapes.set(id, shape);
           changes.push({ kind: "updated", shape, previous });
         },

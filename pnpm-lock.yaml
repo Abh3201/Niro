@@ -82,6 +82,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@fontsource/kalam':
+        specifier: 5.3.0
+        version: 5.3.0
       '@niro/doc':
         specifier: workspace:*
         version: link:../../packages/doc
@@ -634,6 +637,9 @@ packages:
   '@fails-components/webtransport@1.6.10':
     resolution: {integrity: sha512-WT8Wzlg7+3J1Ti6CvdEUD1PO2ZuT0CefhH4luSPNM/9CwdmSCNMDX91tsDunq55SDP6mFj4m9daEp6BVS+TpLQ==}
     engines: {node: '>=20'}
+
+  '@fontsource/kalam@5.3.0':
+    resolution: {integrity: sha512-FDkVoDfPDCSN/eO81FOYtUI67eMgpVBJmjBtAqSL0PmEhJyeFY2biC+CR+yEttksgXR9+swpFdYmQTyjwBq80Q==}
 
   '@grpc/grpc-js@1.14.6':
     resolution: {integrity: sha512-SgC/B3/VZ8lTyOZ4Cwk6f1skWhmkNAaVfiX90qd5u1rRXGKk1//8FTUEN9GvOUq7rfWIqAYkA3CoyumYVpOS6g==}
@@ -2406,6 +2412,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  '@fontsource/kalam@5.3.0': {}
 
   '@grpc/grpc-js@1.14.6':
     dependencies:

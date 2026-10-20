@@ -360,6 +360,83 @@ describe("YDocStore", () => {
     expect(text).toMatch(/^>hello( world!!|!! world)$/);
   });
 
+  it("formats parts of a shape's text: synced, undone, and kept by copies and restores", () => {
+    const { a, b, docA } = peers();
+    const seen: Shape[] = [];
+    b.subscribe((changes) => {
+      for (const change of changes) if (change.kind === "updated") seen.push(change.shape);
+    });
+    a.transact((tx) => tx.add(rect("s1", { type: "sticky", text: "Title\nbody" })));
+    a.checkpoint();
+    a.transact((tx) => tx.formatText(id("s1"), 0, 6, { underline: true, size: 32 }));
+    a.checkpoint();
+    for (const store of [a, b])
+      expect(store.get(id("s1"))?.textRuns).toEqual([
+        { length: 6, marks: { underline: true, size: 32 } },
+        { length: 4, marks: {} },
+      ]);
+    // A format alone is news to listeners, though no character changed.
+    expect(seen.at(-1)?.textRuns?.[0]?.marks).toEqual({ underline: true, size: 32 });
+
+    // Typed text takes the marks it's given, none it isn't.
+    a.transact((tx) => tx.editText(id("s1"), 5, 0, "!", { underline: true, size: 32 }));
+    a.transact((tx) => tx.editText(id("s1"), 11, 0, "?"));
+    expect(b.get(id("s1"))?.textRuns).toEqual([
+      { length: 7, marks: { underline: true, size: 32 } },
+      { length: 5, marks: {} },
+    ]);
+    const saved = Y.encodeStateAsUpdate(docA);
+
+    // Taking a mark away; then undo puts it back.
+    a.checkpoint();
+    a.transact((tx) => tx.formatText(id("s1"), 0, 7, { underline: null }));
+    expect(a.get(id("s1"))?.textRuns?.[0]?.marks).toEqual({ size: 32 });
+    a.undo();
+    expect(a.get(id("s1"))?.textRuns?.[0]?.marks).toEqual({ underline: true, size: 32 });
+    a.undo();
+    a.undo();
+    a.undo();
+    expect(b.get(id("s1"))?.text).toBe("Title\nbody");
+    expect(b.get(id("s1"))?.textRuns).toBeUndefined();
+
+    // A restored version has its formatting.
+    expect(a.restore(saved)).toBe(true);
+    expect(b.get(id("s1"))?.textRuns?.[0]).toEqual({
+      length: 7,
+      marks: { underline: true, size: 32 },
+    });
+
+    // So does a copy.
+    const copy = { ...(a.get(id("s1")) as Shape), id: id("s2") };
+    a.transact((tx) => tx.add(copy));
+    expect(b.get(id("s2"))?.textRuns).toEqual(a.get(id("s1"))?.textRuns);
+  });
+
+  it("formats only shapes that take formatting, and only with marks it knows", () => {
+    const doc = new Y.Doc();
+    const store = createYDocStore(doc);
+    store.transact((tx) => {
+      tx.add(rect("s1", { text: "abc" }));
+      tx.add(rect("f1", { type: "frame", text: "abc" }));
+    });
+    store.transact((tx) => {
+      tx.formatText(id("s1"), 0, 1, { bold: true });
+      tx.formatText(id("f1"), 0, 1, { bold: true });
+    });
+    expect(store.get(id("s1"))?.textRuns).toEqual([
+      { length: 1, marks: { bold: true } },
+      { length: 2, marks: {} },
+    ]);
+    expect(store.get(id("f1"))?.textRuns).toBeUndefined();
+    // Junk from another client is dropped, not drawn.
+    const text = (doc.getMap("shapes").get("s1") as Y.Map<unknown>).get("text") as Y.Text;
+    doc.transact(() => text.format(1, 1, { size: "huge", font: "comic", bold: "yes" }));
+    expect(store.get(id("s1"))?.textRuns).toEqual([
+      { length: 1, marks: { bold: true } },
+      { length: 2, marks: {} },
+    ]);
+  });
+
   it("edits text by position, clamping positions past the end", () => {
     const doc = new Y.Doc();
     const store = createYDocStore(doc);
@@ -474,7 +551,7 @@ describe("YDocStore", () => {
   });
 
   it("opens a board from a newer version read-only, whatever this version is", () => {
-    expect(SCHEMA_VERSION).toBe(9);
+    expect(SCHEMA_VERSION).toBe(10);
     const doc = new Y.Doc();
     doc.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
     expect(createYDocStore(doc).readOnly).toBe(true);

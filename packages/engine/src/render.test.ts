@@ -42,7 +42,7 @@ function recorder() {
 function draw(s: Shape, zoom: number) {
   const { ctx, calls } = recorder();
   const layout = s.text ? layoutText(s, measure) : undefined;
-  drawShape(ctx, s, LIGHT_PALETTE, zoom, layout ? { text: { layout, baseline: 0.8, zoom } } : {});
+  drawShape(ctx, s, LIGHT_PALETTE, zoom, layout ? { text: { layout, zoom } } : {});
   return calls;
 }
 
@@ -106,7 +106,7 @@ describe("drawing text", () => {
       },
     ) as CanvasRenderingContext2D;
     const layout = layoutText(s, measure);
-    drawShape(ctx, s, LIGHT_PALETTE, 1, { text: { layout, baseline: 0.8, zoom: 1 } });
+    drawShape(ctx, s, LIGHT_PALETTE, 1, { text: { layout, zoom: 1 } });
     return { lines, layout, scale };
   }
 

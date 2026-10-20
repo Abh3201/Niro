@@ -9,6 +9,9 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+// The handwriting font, served with the app (SIL Open Font License).
+import "@fontsource/kalam/400.css";
+import "@fontsource/kalam/700.css";
 import { THEME_SCRIPT } from "./board/theme";
 
 export const links: Route.LinksFunction = () => [

@@ -25,7 +25,6 @@ export interface ExportInput {
   readonly palette: Palette;
   /** Fill behind the shapes. */
   readonly background: string;
-  baseline(font: string): number;
   textLayout(shape: Shape): TextLayout | undefined;
   stroke(shape: Shape): Path2D | undefined;
 }
@@ -66,7 +65,6 @@ export function exportSvg(input: ExportInput): string | null {
     scene: input.scene,
     palette: input.palette,
     zoom: FULL_DETAIL,
-    baseline: input.baseline,
     textLayout: input.textLayout,
     // The same outline the screen fills, as path data.
     stroke: (shape) => {
@@ -98,7 +96,6 @@ export async function exportPng(input: ExportInput): Promise<Blob | null> {
     scene: input.scene,
     palette: input.palette,
     zoom: FULL_DETAIL,
-    baseline: input.baseline,
     textLayout: input.textLayout,
     stroke: input.stroke,
   });

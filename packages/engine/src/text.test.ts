@@ -278,3 +278,118 @@ describe("formatted text", () => {
     expect(inkColor(shape({ type: "rectangle", textColor: "black" }), dark)).toBe("#eeeeee");
   });
 });
+
+describe("text formatted in parts", () => {
+  const baseline = () => 1; // the baseline a whole font size down: easy to add up
+
+  it("sets each part in its own size, lines as tall as their biggest part", () => {
+    const text = shape({
+      type: "text",
+      w: 1000,
+      h: 30,
+      text: "Big\nsmall",
+      textRuns: [
+        { length: 4, marks: { size: 48, bold: true } },
+        { length: 5, marks: {} },
+      ],
+    });
+    const layout = layoutText(text, measure, baseline);
+    expect(layout.rows.map((row) => row.text)).toEqual(["Big", "small"]);
+    const [big, small] = layout.rows;
+    expect(big?.height).toBe(48 * 1.25);
+    expect(big?.baseline).toBe(48);
+    expect(small?.top).toBe(48 * 1.25);
+    expect(small?.height).toBe(TEXT_FONT_SIZE * 1.25);
+    expect(layout.height).toBe(48 * 1.25 + TEXT_FONT_SIZE * 1.25);
+    expect(big?.pieces[0]?.style).toMatchObject({ size: 48, bold: true });
+    expect(big?.width).toBe(3 * 48);
+    expect(fittedTextHeight(text, measure, baseline)).toBe(layout.height);
+  });
+
+  it("splits a line where its formatting changes, and wraps by the parts' own widths", () => {
+    const text = shape({
+      type: "text",
+      w: 100,
+      h: 30,
+      text: "aa bb",
+      textRuns: [
+        { length: 3, marks: { size: 10 } },
+        { length: 2, marks: { size: 40, color: "red" } },
+      ],
+    });
+    // "aa " is 30 wide; "bb" 80: together past 100, so "bb" wraps.
+    const layout = layoutText(text, measure, baseline);
+    expect(layout.rows.map((row) => row.text)).toEqual(["aa", "bb"]);
+    expect(layout.rows[0]?.width).toBe(20);
+    expect(layout.rows[1]?.pieces[0]?.style.color).toBe("red");
+    const wide = layoutText({ ...text, w: 120 }, measure, baseline);
+    expect(wide.rows).toHaveLength(1);
+    expect(wide.rows[0]?.pieces.map((p) => [p.text, p.x, p.width])).toEqual([
+      ["aa ", 0, 30],
+      ["bb", 30, 80],
+    ]);
+  });
+
+  it("aligns each paragraph as its line break says, the last as the shape", () => {
+    const note = shape({
+      text: "a\nb\nc",
+      align: "left",
+      textRuns: [
+        { length: 1, marks: {} },
+        { length: 1, marks: { align: "right" } },
+        { length: 3, marks: {} },
+      ],
+    });
+    expect(layoutText(note, measure).rows.map((row) => row.align)).toEqual([
+      "right",
+      "left",
+      "left",
+    ]);
+  });
+
+  it("shrinks every size in a box by the same factor until the text fits", () => {
+    const note = shape({
+      w: 100,
+      h: 100,
+      text: "aaaa\nbb",
+      textRuns: [
+        { length: 5, marks: { size: 100 } },
+        { length: 2, marks: {} },
+      ],
+    });
+    const layout = layoutText(note, measure, baseline);
+    expect(layout.scale).toBeLessThan(1);
+    const first = layout.rows[0];
+    const last = layout.rows[layout.rows.length - 1];
+    expect(last?.text).toBe("bb");
+    expect((first?.pieces[0]?.style.size ?? 0) / (last?.pieces[0]?.style.size ?? 1)).toBeCloseTo(
+      100 / 12,
+    );
+    expect(layout.height).toBeLessThanOrEqual(100 - 2 * 8);
+    // Each line fits across the box.
+    for (const row of layout.rows) expect(row.width).toBeLessThanOrEqual(layout.width);
+  });
+
+  it("gives an empty line the size of what would be typed on it", () => {
+    const text = shape({
+      type: "text",
+      text: "a\n",
+      textRuns: [{ length: 2, marks: { size: 40 } }],
+    });
+    const layout = layoutText(text, measure, baseline);
+    expect(layout.rows.map((row) => row.height)).toEqual([50, 50]);
+  });
+
+  it("lays a shape out again when parts of its text are formatted", () => {
+    let calls = 0;
+    const layouts = new TextLayouts((s) => {
+      calls++;
+      return s.length;
+    });
+    const note = shape({ text: "hello" });
+    layouts.get(note);
+    const before = calls;
+    layouts.get({ ...note, textRuns: [{ length: 5, marks: { bold: true } }] });
+    expect(calls).toBeGreaterThan(before);
+  });
+});

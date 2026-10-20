@@ -1,4 +1,13 @@
-import type { DocStore, ReactionName, Shape, ShapeId, ShapePatch, Tx } from "@niro/doc";
+import type {
+  DocStore,
+  MarkPatch,
+  ReactionName,
+  Shape,
+  ShapeId,
+  ShapePatch,
+  TextMarks,
+  Tx,
+} from "@niro/doc";
 import type { Point } from "./geometry";
 import type { Scene } from "./scene";
 
@@ -28,7 +37,8 @@ export function transact(doc: DocStore, scene: Scene, fn: (tx: Tx) => void): voi
 class BoardTx implements Tx {
   private readonly added = new Map<ShapeId, Shape>();
   private readonly updates = new Map<ShapeId, ShapePatch>();
-  private readonly texts: Array<[ShapeId, number, number, string]> = [];
+  /** Text edits and formatting, in the order they were made: each one's positions depend on those before. */
+  private readonly texts: Array<(tx: Tx) => void> = [];
   private readonly removed = new Set<ShapeId>();
   private readonly reactions: Array<[ShapeId, ReactionName, string, boolean]> = [];
   /** Where each shape is on the board once the batch is in, worked out as needed. */
@@ -47,8 +57,18 @@ class BoardTx implements Tx {
     else this.updates.set(id, { ...this.updates.get(id), ...patch });
   }
 
-  editText(id: ShapeId, index: number, deleteCount: number, insert: string): void {
-    this.texts.push([id, index, deleteCount, insert]);
+  editText(
+    id: ShapeId,
+    index: number,
+    deleteCount: number,
+    insert: string,
+    marks?: TextMarks,
+  ): void {
+    this.texts.push((tx) => tx.editText(id, index, deleteCount, insert, marks));
+  }
+
+  formatText(id: ShapeId, index: number, length: number, patch: MarkPatch): void {
+    this.texts.push((tx) => tx.formatText(id, index, length, patch));
   }
 
   remove(id: ShapeId): void {
@@ -71,8 +91,7 @@ class BoardTx implements Tx {
       if (!this.updates.has(id) && !this.removed.has(id) && this.rehomed(id))
         tx.update(id, this.stored(id));
     }
-    for (const [id, index, deleteCount, insert] of this.texts)
-      tx.editText(id, index, deleteCount, insert);
+    for (const write of this.texts) write(tx);
     for (const [id, reaction, user, on] of this.reactions) tx.react(id, reaction, user, on);
     for (const id of this.removed) tx.remove(id);
   }

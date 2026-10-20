@@ -63,4 +63,18 @@ export {
   type VerticalAlign,
 } from "./shape";
 export type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
+export {
+  editRuns,
+  formatRuns,
+  MARK_NAMES,
+  type MarkName,
+  type MarkPatch,
+  marksAt,
+  marksForInsert,
+  patchMarks,
+  readMarks,
+  styleIndex,
+  type TextMarks,
+  type TextRun,
+} from "./text-runs";
 export { effectiveParents } from "./tree";

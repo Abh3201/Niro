@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { isValidIndex } from "./order";
+import { readRuns, type TextRun } from "./text-runs";
 
 /**
  * Bumped whenever the stored board format changes. Old boards are migrated
@@ -14,8 +15,10 @@ import { isValidIndex } from "./order";
  * 8: arrows can be routed with right angles (elbow arrows).
  * 9: text formatting: font, size, bold, italic, underline, strikethrough,
  *    alignment and text color, per shape.
+ * 10: formatting on parts of a shape's text (`textRuns`), and paragraph
+ *    alignment, stored as Y.Text formatting attributes.
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
@@ -301,11 +304,19 @@ export interface Shape {
   readonly valign?: VerticalAlign;
   /** Boxes only: a text shape's text is in its `color`. */
   readonly textColor?: TextColor;
+  /**
+   * Formatting on parts of the text, over the fields above, which are the
+   * defaults for what isn't formatted (`takesTextStyle` shapes only). Runs
+   * cover the whole text in order; absent when no part is formatted. Read
+   * from the `Y.Text`'s attributes: change it with `Tx.editText` and
+   * `Tx.formatText`, never with `Tx.update`.
+   */
+  readonly textRuns?: readonly TextRun[];
 }
 
-/** Fields `Tx.update` can set. Text changes go through `Tx.editText`, reactions through `Tx.react`; points and assets never change. */
+/** Fields `Tx.update` can set. Text changes go through `Tx.editText` and `Tx.formatText`, reactions through `Tx.react`; points and assets never change. */
 export type ShapePatch = Partial<
-  Omit<Shape, "id" | "type" | "text" | "points" | "asset" | "reactions">
+  Omit<Shape, "id" | "type" | "text" | "textRuns" | "points" | "asset" | "reactions">
 >;
 
 const TAU = Math.PI * 2;
@@ -378,6 +389,8 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const valign = boxed ? oneOf(VALIGNS, raw.valign) : undefined;
   const textColor = boxed ? oneOf(COLORS, raw.textColor) : undefined;
   const flag = (value: unknown) => styled && value === true;
+  const shapeText = typeof text === "string" && holdsText(shapeType) ? text : "";
+  const textRuns = styled ? readRuns(raw.textRuns, shapeText.length) : undefined;
 
   return {
     id: id as ShapeId,
@@ -393,7 +406,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
       typeof color === "string" && (COLORS as readonly string[]).includes(color)
         ? (color as ColorName)
         : DEFAULT_COLOR[shapeType],
-    text: typeof text === "string" && holdsText(shapeType) ? text : "",
+    text: shapeText,
     points: shapeType === "freehand" ? readPoints(raw.points) : [],
     from: attached(raw.from),
     to: attached(raw.to),
@@ -415,6 +428,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     ...(align && align !== defaultAlign(shapeType) && { align }),
     ...(valign && valign !== "middle" && { valign }),
     ...(textColor && { textColor }),
+    ...(textRuns && { textRuns }),
   };
 }
 

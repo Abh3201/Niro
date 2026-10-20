@@ -1,6 +1,6 @@
 # 0013: Text formatting is per shape: one font, size, style, alignment and color for all of a shape's text
 
-- Status: accepted
+- Status: accepted; amended by [0014](0014-rich-text.md), which adds formatting on parts of the text (these fields become their defaults) and serves the handwriting font
 - Date: 2026-10-20
 - Code: [`packages/doc/src/shape.ts`](../../packages/doc/src/shape.ts) (`takesTextStyle`, `readShape`), [`packages/engine/src/text.ts`](../../packages/engine/src/text.ts) (`cssFont`, `layoutText`, `canvasFontMetrics`), [`packages/engine/src/render.ts`](../../packages/engine/src/render.ts) (`drawText`), [`packages/engine/src/structure.ts`](../../packages/engine/src/structure.ts) (`sharedTextStyle`, `textStylePatch`), [`apps/web/app/board/SelectionPanel.tsx`](../../apps/web/app/board/SelectionPanel.tsx)
 

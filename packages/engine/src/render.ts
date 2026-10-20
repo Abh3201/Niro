@@ -4,7 +4,14 @@ import { PEN_SIZE } from "./freehand";
 import { type Box, boxFromPoints, type Point, rotateAround, unionBoxes } from "./geometry";
 import { reactionsExtent } from "./reactions";
 import { shapeCenter, shapeExtent } from "./shapes";
-import { inkColor, LINE_HEIGHT, MEASURE_SIZE, type TextLayout } from "./text";
+import {
+  inkColor,
+  LINE_HEIGHT,
+  MEASURE_SIZE,
+  type PieceStyle,
+  type TextLayout,
+  type TextLine,
+} from "./text";
 
 export interface Palette {
   /** Shape fills and line strokes. */
@@ -101,10 +108,10 @@ function shapeBoxExtent(shape: Shape, layout?: TextLayout): Box {
     maxX: box.maxX + pad,
     maxY: box.maxY + pad,
   };
-  if (!layout || layout.lines.length === 0) return padded;
+  if (!layout || layout.rows.length === 0) return padded;
   // Text is laid out in the shape's own frame, and turns with it.
   const c = shapeCenter(shape);
-  const height = layout.lines.length * layout.fontSize * LINE_HEIGHT;
+  const { height } = layout;
   const corners = [
     { x: layout.x, y: layout.y },
     { x: layout.x + layout.width, y: layout.y },
@@ -117,8 +124,6 @@ function shapeBoxExtent(shape: Shape, layout?: TextLayout): Box {
 /** A shape's text, laid out, and how to draw it. */
 export interface ShapeText {
   readonly layout: TextLayout;
-  /** `FontMetrics.baseline` for the layout's font. */
-  readonly baseline: number;
   /** Screen pixels per world unit. */
   readonly zoom: number;
 }
@@ -226,8 +231,8 @@ export function drawShape(
       break;
   }
   const { text } = extras;
-  if (text && text.layout.fontSize * zoom >= HIDE_TEXT_BELOW_PX)
-    drawText(ctx, shape, text, inkColor(shape, palette), cx, cy);
+  if (text && largestSize(text.layout) * zoom >= HIDE_TEXT_BELOW_PX)
+    drawText(ctx, shape, text, palette, cx, cy);
   if (turned) ctx.restore();
 }
 
@@ -291,72 +296,96 @@ function drawHead(
   ctx.fill();
 }
 
-/** Draws laid-out text, centered on `(cx, cy)`: the shape's center, underlined or struck through as `shape` says. */
+/** Font size of a line's biggest letters, near enough: its height is that times `LINE_HEIGHT`. */
+const rowSize = (row: TextLine) => row.height / LINE_HEIGHT;
+
+/** Font size of a layout's biggest letters. */
+function largestSize(layout: TextLayout): number {
+  let size = 0;
+  for (const row of layout.rows) size = Math.max(size, rowSize(row));
+  return size;
+}
+
+/**
+ * Draws laid-out text, centered on `(cx, cy)`: the shape's center. Each
+ * piece of a line in its own font, size and color, underlined or struck
+ * through as its style says.
+ */
 function drawText(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
   text: ShapeText,
-  ink: string,
+  palette: Palette,
   cx: number,
   cy: number,
 ): void {
-  const { baseline, zoom } = text;
-  const layout = { ...text.layout, x: text.layout.x + cx, y: text.layout.y + cy };
-  const { fontSize, lines, widths } = layout;
-  const lineHeight = fontSize * LINE_HEIGHT;
-  const left = (i: number) =>
-    layout.align === "left"
-      ? layout.x
-      : layout.align === "right"
-        ? layout.x + layout.width - (widths[i] ?? 0)
-        : layout.x + (layout.width - (widths[i] ?? 0)) / 2;
-  ctx.fillStyle = ink;
-
-  if (fontSize * zoom < GREEK_BELOW_PX) {
-    ctx.globalAlpha = 0.35;
-    lines.forEach((_, i) => {
-      const width = widths[i] ?? 0;
-      if (width > 0)
-        ctx.fillRect(left(i), layout.y + i * lineHeight + fontSize * 0.25, width, fontSize * 0.6);
-    });
-    ctx.globalAlpha = 1;
-    return;
-  }
-
-  // Set at the size it was measured at and scaled down, so each line is as
-  // wide as `measure` said (see text.ts). `maxWidth` squeezes a line that
-  // still comes out wider, rather than letting it run out of its shape.
-  // Scaling back after is cheaper than save and restore, which add up when
-  // thousands of notes are on screen.
-  const k = fontSize / MEASURE_SIZE;
-  // A line can't be wider than the room right of where it starts, unless
-  // it's one character that never fit.
-  const room = (i: number) => Math.max(widths[i] ?? 0, layout.x + layout.width - left(i));
-  ctx.scale(k, k);
-  ctx.font = layout.font;
+  const { layout, zoom } = text;
+  const x = layout.x + cx;
+  const y = layout.y + cy;
+  const left = (row: TextLine) =>
+    row.align === "left"
+      ? x
+      : row.align === "right"
+        ? x + layout.width - row.width
+        : x + (layout.width - row.width) / 2;
+  const shapeInk = inkColor(shape, palette);
+  const ink = (style: PieceStyle) =>
+    style.color === null ? shapeInk : inkColor(shape, palette, style.color);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  lines.forEach((line, i) => {
-    if (line.trim() !== "")
+  let font = "";
+  for (const row of layout.rows) {
+    if (row.width <= 0) continue;
+    const start = left(row);
+    const top = y + row.top;
+    if (rowSize(row) * zoom < GREEK_BELOW_PX) {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = shapeInk;
+      ctx.fillRect(start, top + row.height * 0.2, row.width, row.height * 0.48);
+      ctx.globalAlpha = 1;
+      continue;
+    }
+    const base = top + row.baseline;
+    // Room right of where the line starts: a line can't be wider, unless
+    // it's one character that never fit.
+    const slack = Math.max(0, x + layout.width - start - row.width);
+    const last = row.pieces.length - 1;
+    row.pieces.forEach((piece, i) => {
+      const { style } = piece;
+      const shown = i === last ? piece.text.trimEnd() : piece.text;
+      if (shown === "" || piece.width <= 0) return;
+      ctx.fillStyle = ink(style);
+      // Set at the size it was measured at and scaled down, so each piece
+      // is as wide as `measure` said (see text.ts). `maxWidth` squeezes
+      // one that still comes out wider, rather than letting it run on.
+      // Scaling back after is cheaper than save and restore, which add up
+      // when thousands of notes are on screen.
+      const k = style.size / MEASURE_SIZE;
+      ctx.scale(k, k);
+      if (font !== style.font) {
+        ctx.font = style.font;
+        font = style.font;
+      }
       ctx.fillText(
-        line,
-        left(i) / k,
-        (layout.y + i * lineHeight + baseline * fontSize) / k,
-        room(i) / k,
+        shown,
+        (start + piece.x) / k,
+        base / k,
+        (piece.width + (i === last ? slack : 0)) / k,
       );
-  });
-  ctx.scale(1 / k, 1 / k);
-
-  // Lines under or through the text, as long as each line's letters, at
-  // about where browsers draw them for most fonts.
-  if (!shape.underline && !shape.strike) return;
-  const thickness = fontSize * (shape.bold ? 0.075 : 0.055);
-  lines.forEach((line, i) => {
-    const width = Math.min(widths[i] ?? 0, room(i));
-    if (line.trim() === "" || width <= 0) return;
-    const base = layout.y + i * lineHeight + baseline * fontSize;
-    if (shape.underline) ctx.fillRect(left(i), base + fontSize * 0.1, width, thickness);
-    if (shape.strike)
-      ctx.fillRect(left(i), base - fontSize * 0.3 - thickness / 2, width, thickness);
-  });
+      ctx.scale(1 / k, 1 / k);
+      // Lines under or through the letters, at about where browsers draw
+      // them for most fonts.
+      if (!style.underline && !style.strike) return;
+      const thickness = style.size * (style.bold ? 0.075 : 0.055);
+      if (style.underline)
+        ctx.fillRect(start + piece.x, base + style.size * 0.1, piece.width, thickness);
+      if (style.strike)
+        ctx.fillRect(
+          start + piece.x,
+          base - style.size * 0.3 - thickness / 2,
+          piece.width,
+          thickness,
+        );
+    });
+  }
 }

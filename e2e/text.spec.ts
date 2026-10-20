@@ -15,7 +15,7 @@ test("type on a new sticky note; the text is drawn and kept", async ({ page }) =
   const editor = page.getByTestId("text-editor");
   await expect(editor).toBeFocused();
   await page.keyboard.type("Hello Niro");
-  await expect(editor).toHaveValue("Hello Niro");
+  await expect(editor).toHaveText("Hello Niro");
   // While it's being edited, the editor shows the text and the canvas doesn't.
   expect(await inkPixels(page, STICKY)).toBe(0);
 
@@ -64,10 +64,10 @@ test("double-click a shape to write in it; Enter edits again; undo takes the tex
   await expect.poll(() => inkPixels(page, inside)).toBeGreaterThan(20);
 
   await page.keyboard.press("Enter");
-  await expect(editor).toHaveValue("ok");
+  await expect(editor).toHaveText("ok");
   await page.keyboard.type("!");
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(editor).toHaveValue("ok");
+  await expect(editor).toHaveText("ok");
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("ControlOrMeta+z");
@@ -89,7 +89,7 @@ test.describe("on a touch screen", () => {
 
     await page.touchscreen.tap(640, 360);
     await page.touchscreen.tap(640, 360);
-    await expect(editor).toHaveValue("tapped");
+    await expect(editor).toHaveText("tapped");
   });
 });
 
@@ -135,15 +135,16 @@ test("formatting applies to a note's whole text, undoes, survives a reload and e
   await page.keyboard.press("Control+z");
   await expect.poll(() => inkPixels(page, top)).toBeGreaterThan(50);
 
-  // Ctrl + B while typing makes the whole note bold, and typing carries on.
+  // Ctrl + B while typing is for what's typed next: "Hello" stays as it was.
   await page.keyboard.press("Enter");
   const editor = page.getByTestId("text-editor");
   await expect(editor).toBeFocused();
   await page.keyboard.press("Control+b");
   await expect(page.getByTestId("text-bold")).toHaveAttribute("aria-pressed", "true");
   await expect(editor).toBeFocused();
-  await expect(editor).toHaveCSS("font-weight", "700");
   await page.keyboard.type("!");
+  await expect(editor.locator("span", { hasText: "!" })).toHaveCSS("font-weight", "700");
+  await expect(editor.locator("span", { hasText: "Hello" })).toHaveCSS("font-weight", "400");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await expectStatus(page, 1, 0);
@@ -154,12 +155,66 @@ test("formatting applies to a note's whole text, undoes, survives a reload and e
   ]);
   const svg = await readFile(await file.path(), "utf8");
   expect(svg).toContain("bold 100px");
-  expect(svg).toContain("Hello!");
+  expect(svg).toContain("Hello");
 
   await page.reload();
   await waitUntilLive(page);
   await page.mouse.click(700, 440);
   await expectStatus(page, 1, 1);
-  await expect(page.getByTestId("text-bold")).toHaveAttribute("aria-pressed", "true");
+  // Part bold, part not.
+  await expect(page.getByTestId("text-bold")).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("text-valign-top")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("formatting while typing applies to the selected line; a new line carries it on", async ({
+  page,
+}) => {
+  await page.keyboard.press("n");
+  await page.mouse.click(640, 360);
+  const editor = page.getByTestId("text-editor");
+  const line = (n: number) => editor.locator(":scope > div").nth(n).locator("span").first();
+  await page.keyboard.type("Title");
+  // New text is in the handwriting font.
+  await expect(line(0)).toHaveCSS("font-family", /Kalam/);
+
+  // Underline the first line, then start a second: it's underlined too.
+  await page.keyboard.press("Shift+Home");
+  await page.keyboard.press("Control+u");
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("body");
+  await expect(line(0)).toHaveCSS("text-decoration-line", "underline");
+  await expect(line(1)).toHaveCSS("text-decoration-line", "underline");
+
+  // Changing the second line leaves the first alone.
+  await page.keyboard.press("Shift+Home");
+  await page.keyboard.press("Control+u");
+  await expect(page.getByTestId("text-underline")).toHaveAttribute("aria-pressed", "false");
+  const size = async (n: number) =>
+    Number.parseFloat(await line(n).evaluate((el) => getComputedStyle(el).fontSize));
+  await page.getByTestId("text-size").selectOption("16");
+  await expect(editor).toBeFocused();
+  await page.getByTestId("text-align-right").click();
+  await expect(line(1)).toHaveCSS("text-decoration-line", "none");
+  await expect(line(0)).toHaveCSS("text-decoration-line", "underline");
+  // The note's 24 for the first line, 16 for the second.
+  await expect.poll(async () => (await size(0)) / (await size(1))).toBeCloseTo(24 / 16);
+  await expect(editor.locator(":scope > div").nth(1)).toHaveCSS("text-align", "right");
+  await expect(editor.locator(":scope > div").nth(0)).toHaveCSS("text-align", "center");
+
+  // Kept: editing again, and after a reload, shows the same.
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await waitUntilLive(page);
+  await page.mouse.dblclick(640, 360);
+  await expect(editor).toBeFocused();
+  await expect(editor).toContainText("Title");
+  await expect(line(0)).toHaveCSS("text-decoration-line", "underline");
+  await expect(line(1)).toHaveCSS("text-decoration-line", "none");
+  await expect(editor.locator(":scope > div").nth(1)).toHaveCSS("text-align", "right");
+
+  // Undo while typing takes formatting back too.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expectStatus(page, 1, 0);
 });
