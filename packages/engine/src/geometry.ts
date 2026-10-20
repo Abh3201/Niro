@@ -113,6 +113,32 @@ export function polygonIntersectsBox(points: readonly Point[], box: Box): boolea
   return false;
 }
 
+/** True when the open path through `points` touches `box`. */
+export function polylineIntersectsBox(points: readonly Point[], box: Box): boolean {
+  if (!boxesIntersect(boxFromPoints(points), box)) return false;
+  if (points.some((p) => boxContainsPoint(box, p))) return true;
+  const corners = [
+    { x: box.minX, y: box.minY },
+    { x: box.maxX, y: box.minY },
+    { x: box.maxX, y: box.maxY },
+    { x: box.minX, y: box.maxY },
+  ];
+  for (let i = 0; i + 1 < points.length; i++) {
+    for (let j = 0; j < 4; j++) {
+      if (
+        segmentsIntersect(
+          points[i] as Point,
+          points[i + 1] as Point,
+          corners[j] as Point,
+          corners[(j + 1) % 4] as Point,
+        )
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
 export function pointInConvexPolygon(p: Point, points: readonly Point[]): boolean {
   let sign = 0;
   for (let i = 0; i < points.length; i++) {

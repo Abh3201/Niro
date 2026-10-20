@@ -3,6 +3,7 @@ import {
   type DocStore,
   holdsText,
   isLinear,
+  type LineRoute,
   newShapeId,
   type Shape,
   type ShapeId,
@@ -122,6 +123,8 @@ export interface EditorHost {
   fittedHeight(shape: Shape): number;
   /** The laser pointer is at `p`, or (null) was let go. */
   laser?(p: Point | null): void;
+  /** How arrows drawn from now on are routed. */
+  arrowRoute?(): LineRoute;
 }
 
 /** Hit tolerance around shapes and lines, in CSS pixels. */
@@ -832,6 +835,7 @@ export class Interaction {
       points: [],
       from: null,
       to: null,
+      ...(type === "arrow" && this.host.arrowRoute?.() === "elbow" && { route: "elbow" as const }),
       ...geometry,
     };
     return {

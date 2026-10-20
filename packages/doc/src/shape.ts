@@ -11,8 +11,9 @@ import { isValidIndex } from "./order";
  * 5: images, and emoji reactions on shapes.
  * 6: locked shapes, and line styles (dashes, thickness, arrowheads).
  * 7: pen strokes can belong to the sticky note they were drawn on.
+ * 8: arrows can be routed with right angles (elbow arrows).
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** Shape ids are generated on the client and never reused. */
 export type ShapeId = string & { readonly __brand: "ShapeId" };
@@ -73,6 +74,13 @@ export type LineDash = (typeof DASHES)[number];
 /** How thick a line or arrow is drawn. Absent means medium. */
 export const THICKNESSES = ["thin", "medium", "thick"] as const;
 export type LineThickness = (typeof THICKNESSES)[number];
+
+/**
+ * How an arrow is routed: straight between its ends, or with right angles
+ * around the shapes it connects. Absent means straight.
+ */
+export const ROUTES = ["straight", "elbow"] as const;
+export type LineRoute = (typeof ROUTES)[number];
 
 /**
  * Where a line or arrow has a head. Absent means the end for an arrow and
@@ -229,6 +237,8 @@ export interface Shape {
   readonly dash?: LineDash;
   readonly thickness?: LineThickness;
   readonly head?: LineHead;
+  /** Arrows only; present only when elbow. The path is worked out wherever the arrow is drawn, never stored. */
+  readonly route?: LineRoute;
 }
 
 /** Fields `Tx.update` can set. Text changes go through `Tx.editText`, reactions through `Tx.react`; points and assets never change. */
@@ -294,6 +304,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
   const dash = isLine ? oneOf(DASHES, raw.dash) : undefined;
   const thickness = isLine ? oneOf(THICKNESSES, raw.thickness) : undefined;
   const head = isLine ? oneOf(HEADS, raw.head) : undefined;
+  const route = isArrow ? oneOf(ROUTES, raw.route) : undefined;
 
   return {
     id: id as ShapeId,
@@ -321,6 +332,7 @@ export function readShape(id: string, raw: Readonly<Record<string, unknown>>): S
     ...(dash && dash !== "solid" && { dash }),
     ...(thickness && thickness !== "medium" && { thickness }),
     ...(head && head !== defaultHead(shapeType) && { head }),
+    ...(route && route !== "straight" && { route }),
   };
 }
 

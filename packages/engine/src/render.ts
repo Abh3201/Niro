@@ -1,6 +1,7 @@
 import { type ColorName, defaultHead, isLinear, type Shape } from "@niro/doc";
+import { linePoints } from "./elbow";
 import { PEN_SIZE } from "./freehand";
-import { type Box, boxFromPoints, rotateAround, unionBoxes } from "./geometry";
+import { type Box, boxFromPoints, type Point, rotateAround, unionBoxes } from "./geometry";
 import { reactionsExtent } from "./reactions";
 import { shapeCenter, shapeExtent } from "./shapes";
 import { FONT_FAMILY, inkColor, LINE_HEIGHT, MEASURE_SIZE, type TextLayout } from "./text";
@@ -226,35 +227,46 @@ export function drawShape(
   if (turned) ctx.restore();
 }
 
-/** A line, or an arrow: dashed or not, with a filled head at either end or both. */
+/** A line, or an arrow: dashed or not, with a filled head at either end or both, along a straight or elbowed path. */
 function drawLine(ctx: CanvasRenderingContext2D, shape: Shape, color: string): void {
-  const { x, y, w, h } = shape;
+  const points = linePoints(shape);
+  const first = points[0] as Point;
+  const second = points[1] as Point;
+  const last = points[points.length - 1] as Point;
+  const beforeLast = points[points.length - 2] as Point;
   const width = lineWidthOf(shape);
-  const length = Math.hypot(w, h);
   const heads = shape.head ?? defaultHead(shape.type);
-  const ux = length > 0 ? w / length : 0;
-  const uy = length > 0 ? h / length : 0;
-  const size = Math.min(width * HEAD_WIDTHS, length * 0.5);
-  const startHead = heads === "start" || heads === "both" ? size : 0;
-  const endHead = heads === "end" || heads === "both" ? size : 0;
+  const startLength = Math.hypot(second.x - first.x, second.y - first.y);
+  const endLength = Math.hypot(beforeLast.x - last.x, beforeLast.y - last.y);
+  // Unit vectors pointing from each end along the shaft.
+  const sx = startLength > 0 ? (second.x - first.x) / startLength : 0;
+  const sy = startLength > 0 ? (second.y - first.y) / startLength : 0;
+  const ex = endLength > 0 ? (beforeLast.x - last.x) / endLength : 0;
+  const ey = endLength > 0 ? (beforeLast.y - last.y) / endLength : 0;
+  // A head is at most half the segment it sits on, so a short last segment gets a small one.
+  const startHead =
+    heads === "start" || heads === "both" ? Math.min(width * HEAD_WIDTHS, startLength * 0.5) : 0;
+  const endHead =
+    heads === "end" || heads === "both" ? Math.min(width * HEAD_WIDTHS, endLength * 0.5) : 0;
   // The shaft stops inside each head, so its round cap can't poke through the tip.
-  const from = startHead * 0.6;
-  const to = Math.max(from, length - endHead * 0.6);
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   const dash = shape.dash ?? "solid";
   // Dots are zero-length dashes, which round caps make into circles.
   if (dash === "dashed") ctx.setLineDash([width * 3, width * 2.5]);
   else if (dash === "dotted") ctx.setLineDash([0.01, width * 2.2]);
   ctx.beginPath();
-  ctx.moveTo(x + ux * from, y + uy * from);
-  ctx.lineTo(x + ux * to, y + uy * to);
+  ctx.moveTo(first.x + sx * startHead * 0.6, first.y + sy * startHead * 0.6);
+  for (let i = 1; i < points.length - 1; i++)
+    ctx.lineTo((points[i] as Point).x, (points[i] as Point).y);
+  ctx.lineTo(last.x + ex * endHead * 0.6, last.y + ey * endHead * 0.6);
   ctx.stroke();
   if (dash !== "solid") ctx.setLineDash([]);
   ctx.fillStyle = color;
-  if (endHead > 0) drawHead(ctx, { x: x + w, y: y + h }, -ux, -uy, endHead);
-  if (startHead > 0) drawHead(ctx, { x, y }, ux, uy, startHead);
+  if (endHead > 0) drawHead(ctx, last, ex, ey, endHead);
+  if (startHead > 0) drawHead(ctx, first, sx, sy, startHead);
 }
 
 /** A filled arrowhead with its tip at `tip`, `size` long toward `(dx, dy)`, the unit direction of the shaft. */

@@ -5,6 +5,7 @@ import {
   HEADS,
   REACTION_NAMES,
   REACTIONS,
+  ROUTES,
   THICKNESSES,
 } from "@niro/doc";
 import { DARK_PALETTE, type Engine, LIGHT_PALETTE, type ReactionSummary } from "@niro/engine";
@@ -15,6 +16,7 @@ import {
   GroupIcon,
   HeadSampleIcon,
   LockIcon,
+  RouteSampleIcon,
   SendBackwardIcon,
   SendToBackIcon,
   StrokeSampleIcon,
@@ -237,6 +239,25 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
                 <StrokeSampleIcon width={[1, 2, 4][i]} />
               </button>
             ))}
+            <span className="divider" />
+            {line.routable && (
+              <>
+                <span className="divider" />
+                {ROUTES.map((route) => (
+                  <button
+                    key={route}
+                    type="button"
+                    aria-pressed={line.route === route}
+                    aria-label={`${route} arrow`}
+                    title={route === "elbow" ? "Elbow: right angles around shapes" : "Straight"}
+                    data-testid={`route-${route}`}
+                    onClick={() => engine.setLineStyle({ route })}
+                  >
+                    <RouteSampleIcon route={route} />
+                  </button>
+                ))}
+              </>
+            )}
             <span className="divider" />
             {HEADS.map((head) => (
               <button

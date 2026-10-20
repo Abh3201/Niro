@@ -1,6 +1,7 @@
 import { isLinear, type Shape, type ShapeId, type ShapePatch } from "@niro/doc";
+import { type RouteEnd, routeElbow, setLinePath } from "./elbow";
 import type { Point } from "./geometry";
-import { shapeCenter } from "./shapes";
+import { shapeBounds, shapeCenter } from "./shapes";
 
 /**
  * Arrows attached to shapes. An attached end isn't stored where it's drawn:
@@ -52,6 +53,7 @@ export function resolveArrow(arrow: Shape, get: (id: ShapeId) => Shape | undefin
   const from = attached(arrow.from);
   const to = attached(arrow.to);
   if (!from && !to) return arrow;
+  if (arrow.route === "elbow") return resolveElbow(arrow, from, to);
 
   const start = from ? shapeCenter(from) : { x: arrow.x, y: arrow.y };
   const end = to ? shapeCenter(to) : { x: arrow.x + arrow.w, y: arrow.y + arrow.h };
@@ -66,6 +68,48 @@ export function resolveArrow(arrow: Shape, get: (id: ShapeId) => Shape | undefin
   const a = room ? { x: start.x + d.x * startGap, y: start.y + d.y * startGap } : start;
   const b = room ? { x: end.x - d.x * endGap, y: end.y - d.y * endGap } : end;
   return { ...arrow, x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+}
+
+/**
+ * Where an elbow arrow touches `shape`: the middle of the side that faces
+ * `toward`, a little off it, leaving at right angles. A rotated shape is
+ * treated as its upright bounding box.
+ */
+function elbowEnd(shape: Shape, toward: Point): RouteEnd {
+  const box = shapeBounds(shape);
+  const c = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+  const vx = toward.x - c.x;
+  const vy = toward.y - c.y;
+  const hw = Math.max(1e-9, (box.maxX - box.minX) / 2);
+  const hh = Math.max(1e-9, (box.maxY - box.minY) / 2);
+  // The side the other end is more "beyond": compare in units of the box's half sizes.
+  const horizontal = Math.abs(vx) / hw >= Math.abs(vy) / hh;
+  const heading = horizontal ? { x: vx < 0 ? -1 : 1, y: 0 } : { x: 0, y: vy < 0 ? -1 : 1 };
+  const point = horizontal
+    ? { x: (heading.x > 0 ? box.maxX : box.minX) + heading.x * ATTACH_GAP, y: c.y }
+    : { x: c.x, y: (heading.y > 0 ? box.maxY : box.minY) + heading.y * ATTACH_GAP };
+  return { point, heading, obstacle: box };
+}
+
+/** An elbow arrow with its ends on the sides of the shapes it's attached to, and its path recorded. */
+function resolveElbow(arrow: Shape, from: Shape | undefined, to: Shape | undefined): Shape {
+  const freeStart = { x: arrow.x, y: arrow.y };
+  const freeEnd = { x: arrow.x + arrow.w, y: arrow.y + arrow.h };
+  const start: RouteEnd = from
+    ? elbowEnd(from, to ? shapeCenter(to) : freeEnd)
+    : { point: freeStart, heading: null, obstacle: null };
+  const end: RouteEnd = to
+    ? elbowEnd(to, from ? shapeCenter(from) : freeStart)
+    : { point: freeEnd, heading: null, obstacle: null };
+  const drawn = {
+    ...arrow,
+    x: start.point.x,
+    y: start.point.y,
+    w: end.point.x - start.point.x,
+    h: end.point.y - start.point.y,
+  };
+  setLinePath(drawn, routeElbow(start, end));
+  return drawn;
 }
 
 /**
