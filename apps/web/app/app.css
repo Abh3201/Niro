@@ -207,6 +207,39 @@ body {
   background: var(--panel-border);
 }
 
+.search-panel {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  gap: 4px;
+}
+
+.search-panel input {
+  width: 220px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+
+.search-panel input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.search-count {
+  min-width: 64px;
+  padding: 0 6px;
+  font-size: 13px;
+  text-align: center;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--panel-fg) 65%, transparent);
+}
+
 .zoom-controls {
   position: fixed;
   right: 16px;
