@@ -25,6 +25,16 @@ export interface Assets {
   upload(file: Blob): Promise<UploadedImage>;
   /** Fetches and decodes an image to draw. */
   load(asset: string): Promise<ImageBitmap>;
+  /**
+   * Keeps copies of these images' files in this browser, for a paste into
+   * another board to upload there (`adopt`). Replaces what the last copy kept.
+   */
+  stash(assets: readonly string[]): Promise<void>;
+  /**
+   * Uploads to this board an image file a copy on another board stashed,
+   * and returns its id here; null when this browser doesn't have it.
+   */
+  adopt(asset: string): Promise<string | null>;
 }
 
 /** Something to tell the person: the picture isn't one we can take, or the server said no. */
@@ -38,6 +48,17 @@ interface AssetsOptions {
   token(): Promise<string>;
 }
 
+/**
+ * Where copied images wait for a paste, in this browser: the Cache API, so
+ * any tab of this site can read them. Images are on the realtime server per
+ * board, and the clipboard holds only their ids, so a paste into another
+ * board uploads them there from here.
+ */
+const CLIPBOARD_CACHE = "niro:clipboard-images";
+const clipboardKey = (asset: string) => `/clipboard-images/${asset}`;
+/** Files kept in memory for the next copy, at most: a board holds 50 MB of images. */
+const MAX_REMEMBERED_BYTES = 64 * 1024 * 1024;
+
 export function createAssets({ boardId, realtimeUrl, token }: AssetsOptions): Assets {
   const base = `${realtimeUrl.replace(/^ws/, "http")}/assets/${encodeURIComponent(boardId)}`;
   const request = async (path: string, init: RequestInit = {}) =>
@@ -45,23 +66,64 @@ export function createAssets({ boardId, realtimeUrl, token }: AssetsOptions): As
       ...init,
       headers: { ...init.headers, authorization: `Bearer ${await token()}` },
     });
+  // The files this tab loaded, so a copy doesn't fetch them again.
+  const files = new Map<string, Blob>();
+  let remembered = 0;
+  const remember = (asset: string, blob: Blob) => {
+    if (files.has(asset) || remembered + blob.size > MAX_REMEMBERED_BYTES) return;
+    files.set(asset, blob);
+    remembered += blob.size;
+  };
+  const fileOf = async (asset: string): Promise<Blob | null> => {
+    const known = files.get(asset);
+    if (known) return known;
+    const response = await request(`/${asset}`);
+    return response.ok ? response.blob() : null;
+  };
+  const send = async (blob: Blob): Promise<string> => {
+    const response = await request("", {
+      method: "POST",
+      headers: { "content-type": blob.type },
+      body: blob,
+    });
+    if (!response.ok) throw new ImageError(uploadRefusal(response.status));
+    const { id } = (await response.json()) as { id: string };
+    return id;
+  };
 
   return {
     async upload(file) {
       const prepared = await prepareImage(file);
-      const response = await request("", {
-        method: "POST",
-        headers: { "content-type": prepared.blob.type },
-        body: prepared.blob,
-      });
-      if (!response.ok) throw new ImageError(uploadRefusal(response.status));
-      const { id } = (await response.json()) as { id: string };
-      return { asset: id, width: prepared.width, height: prepared.height };
+      const asset = await send(prepared.blob);
+      return { asset, width: prepared.width, height: prepared.height };
     },
     async load(asset) {
       const response = await request(`/${asset}`);
       if (!response.ok) throw new Error(`Image ${asset} failed with ${response.status}`);
-      return createImageBitmap(await response.blob());
+      const blob = await response.blob();
+      remember(asset, blob);
+      return createImageBitmap(blob);
+    },
+    async stash(assets) {
+      // Without the Cache API (pages not served over HTTPS), images stay on their board.
+      if (typeof caches === "undefined") return;
+      await caches.delete(CLIPBOARD_CACHE);
+      if (assets.length === 0) return;
+      const cache = await caches.open(CLIPBOARD_CACHE);
+      await Promise.all(
+        assets.map(async (asset) => {
+          const blob = await fileOf(asset).catch(() => null);
+          if (blob) await cache.put(clipboardKey(asset), new Response(blob));
+        }),
+      );
+    },
+    async adopt(asset) {
+      if (typeof caches === "undefined") return null;
+      const cache = await caches.open(CLIPBOARD_CACHE);
+      const response = await cache.match(clipboardKey(asset));
+      if (!response) return null;
+      // Sent as it is (the response keeps its type), so it keeps its id.
+      return send(await response.blob());
     },
   };
 }

@@ -22,6 +22,7 @@ import {
   worldToScreen,
   zoomAt,
 } from "./camera";
+import { copyShapes, pasteShapes } from "./clipboard";
 import { exportPng, exportSvg } from "./export";
 import { StrokePaths, strokeOutline, traceOutline } from "./freehand";
 import type { Point, Viewport } from "./geometry";
@@ -50,7 +51,14 @@ import {
   ungroup,
   withDescendants,
 } from "./structure";
-import { canvasFontMetrics, TextLayouts } from "./text";
+import {
+  canvasFontMetrics,
+  DEFAULT_TEXT_WIDTH,
+  MAX_TEXT_LENGTH,
+  TEXT_FONT_SIZE,
+  TextLayouts,
+  withHeight,
+} from "./text";
 import { TextEditor } from "./text-editor";
 import { translate } from "./transform";
 
@@ -160,6 +168,22 @@ export interface Engine {
   /** Takes the selected groups apart, and selects what was in them. */
   ungroupSelection(): void;
   /**
+   * The selected shapes with everything in them, for the clipboard: as
+   * drawn, in draw order (see `copyShapes`). Empty when nothing is selected.
+   */
+  copySelection(): readonly Shape[];
+  /** `copySelection`, then deletes what was copied. Nothing is copied from a board that can't be edited. */
+  cutSelection(): readonly Shape[];
+  /**
+   * Adds copies of `shapes` (from `copySelection`, here or on another
+   * board) centered under the pointer, or in the middle of the screen when
+   * the pointer isn't on the board, and selects them. `asset` gives the
+   * file to use for each image's file.
+   */
+  paste(shapes: readonly Shape[], asset?: (id: string) => string): void;
+  /** Adds a text shape holding `text`, under the pointer or in the middle of the screen, and selects it. */
+  pasteText(text: string): void;
+  /**
    * Adds an image from a stored file, `size` pixels big at most (it's made
    * smaller to fit on screen), centered on `at` (a point in the container,
    * in CSS pixels) or on the middle of the screen, and selects it.
@@ -213,6 +237,8 @@ const FRAME_PLACEHOLDER = "Frame";
 /** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
 const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
+/** Widest a pasted text shape starts, in world units; longer lines wrap. */
+const MAX_PASTED_TEXT_WIDTH = 640;
 /** Largest share of the screen a new image takes up, across or down. */
 const IMAGE_SCREEN_SHARE = 0.6;
 
@@ -757,6 +783,58 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setSelection(freed);
   };
 
+  /** Where pasted things go: under the pointer, or in the middle of the screen. */
+  const pastePoint = () => screenToWorld(state.camera, pointer ?? viewportCenter());
+
+  const copySelection = (): Shape[] => copyShapes(scene, state.selection);
+
+  const cutSelection = (): Shape[] => {
+    if (doc.readOnly) return [];
+    const copied = copySelection();
+    deleteSelection();
+    return copied;
+  };
+
+  const paste = (list: readonly Shape[], asset?: (id: string) => string) => {
+    if (doc.readOnly || list.length === 0) return;
+    interaction.cancel();
+    let copies: ShapeId[] = [];
+    command((tx) => {
+      copies = pasteShapes(scene, tx, list, pastePoint(), asset);
+    });
+    if (state.tool !== "select") setTool("select");
+    setSelection(copies);
+  };
+
+  const pasteText = (raw: string) => {
+    const text = raw.replace(/\r\n?/g, "\n").slice(0, MAX_TEXT_LENGTH);
+    if (doc.readOnly || text.trim() === "") return;
+    // As wide as its longest line, up to a point; longer lines wrap.
+    const longest = Math.max(...text.split("\n").map((line) => fonts.measure(line)));
+    const w = Math.min(
+      MAX_PASTED_TEXT_WIDTH,
+      Math.max(DEFAULT_TEXT_WIDTH / 4, longest * TEXT_FONT_SIZE + 2),
+    );
+    const draft: Shape = {
+      id: newShapeId(),
+      type: "text",
+      x: 0,
+      y: 0,
+      w,
+      h: 1,
+      rotation: 0,
+      parentId: null,
+      index: "a0",
+      color: DEFAULT_COLOR.text,
+      text,
+      points: [],
+      from: null,
+      to: null,
+    };
+    // Pasted like any shape: centered where it goes, in the frame it lands in.
+    paste([{ ...draft, ...withHeight(draft, layouts.fittedHeight(draft)) }]);
+  };
+
   const insertImage = (asset: string, size: ImageSize, at?: Point) => {
     if (doc.readOnly || !(size.width > 0) || !(size.height > 0)) return;
     const { camera, viewport } = state;
@@ -1014,6 +1092,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     reorderSelection,
     groupSelection,
     ungroupSelection,
+    copySelection,
+    cutSelection,
+    paste,
+    pasteText,
     insertImage,
     toggleReaction,
     editText,

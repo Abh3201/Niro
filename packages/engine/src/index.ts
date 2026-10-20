@@ -1,6 +1,7 @@
 export { benchmarkBoard } from "./bench-board";
 export * from "./camera";
 export { backingStoreSize } from "./canvas";
+export { type Clipping, MAX_PASTED_SHAPES, parseClipping, serializeClipping } from "./clipboard";
 export {
   type ColorScheme,
   createEngine,
