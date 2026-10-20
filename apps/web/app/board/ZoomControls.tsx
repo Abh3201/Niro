@@ -1,11 +1,23 @@
 import type { Engine } from "@niro/engine";
+import type { ReactNode } from "react";
 import { MoonIcon, SunIcon } from "./icons";
 import { setThemeChoice, useDarkTheme } from "./theme";
 import { useEngineState } from "./useEngineState";
 import { usePrefersDark } from "./usePrefersDark";
 
-/** Zoom out / current zoom (click to reset) / zoom in, the light/dark switch and the shortcuts list. */
-export function ZoomControls({ engine, onHelp }: { engine: Engine; onHelp: () => void }) {
+/**
+ * Zoom out / current zoom (click to reset) / zoom in, the board menu, the
+ * light/dark switch and the shortcuts list.
+ */
+export function ZoomControls({
+  engine,
+  onHelp,
+  menu,
+}: {
+  engine: Engine;
+  onHelp: () => void;
+  menu: ReactNode;
+}) {
   // Select just the zoom level, so panning doesn't re-render this component.
   const zoom = useEngineState(engine, (s) => s.camera.zoom, 1);
   const percent = Math.round(zoom * 100);
@@ -38,6 +50,7 @@ export function ZoomControls({ engine, onHelp }: { engine: Engine; onHelp: () =>
         +
       </button>
       <span className="divider" aria-hidden="true" />
+      {menu}
       <button
         type="button"
         onClick={toggleTheme}

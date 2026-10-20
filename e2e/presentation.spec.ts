@@ -1,5 +1,13 @@
 import { type Browser, expect, test } from "@playwright/test";
-import { BLUE, drag, drawRectangle, expectPixel, openBoard, waitUntilLive } from "./helpers";
+import {
+  BLUE,
+  drag,
+  drawRectangle,
+  expectPixel,
+  openBoard,
+  openMenu,
+  waitUntilLive,
+} from "./helpers";
 
 async function person(browser: Browser, identity?: { name: string; color: string }) {
   const context = await browser.newContext();
@@ -18,16 +26,18 @@ test("presenting steps through the frames, and others can follow along", async (
   await openBoard(page);
 
   // Two frames: the second, off to the right and down, has a blue box at its center.
+  await openMenu(page, "board-menu");
   await expect(page.getByTestId("present-start")).toBeDisabled();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("f");
   await drag(page, { x: 150, y: 150 }, { x: 450, y: 350 });
   await page.keyboard.press("f");
   await drag(page, { x: 900, y: 500 }, { x: 1200, y: 650 });
   await drawRectangle(page, { x: 1000, y: 545 }, { x: 1100, y: 605 });
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("present-start")).toBeEnabled();
-
   await page.getByTestId("board").click({ position: { x: 700, y: 100 } });
+  await openMenu(page, "board-menu");
+  await expect(page.getByTestId("present-start")).toBeEnabled();
   await page.getByTestId("present-start").click();
   await expect(page.getByTestId("present-count")).toHaveText("Slide 1 of 2");
   await expect(page.getByTestId("tool-select")).toHaveCount(0);

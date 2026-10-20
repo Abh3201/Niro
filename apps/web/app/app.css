@@ -108,8 +108,76 @@ body {
   outline-offset: -2px;
 }
 
+/* A button that is open, or whose mode is on, without being a toggle itself. */
+.panel button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* MenuButton: a button and the small menu it opens. */
+.menu {
+  position: relative;
+  display: flex;
+}
+
+.panel .menu > button {
+  position: relative;
+}
+
+.menu-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+}
+
+.menu-popover {
+  position: absolute;
+  z-index: 5;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 200px;
+}
+
+/* A gap the pointer crosses without the menu closing (see MenuButton). */
+.menu-popover--right {
+  left: calc(100% + 12px);
+  top: -4px;
+}
+
+.menu-popover--above {
+  right: -4px;
+  bottom: calc(100% + 12px);
+}
+
+.panel .menu-popover button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 10px;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.menu-popover kbd {
+  font: inherit;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--panel-fg) 55%, transparent);
+}
+
 .toolbar {
   position: fixed;
+  /* Its menu opens over comment pins and the comment list. */
+  z-index: 5;
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
@@ -290,13 +358,15 @@ body {
   position: fixed;
   right: 16px;
   bottom: 16px;
+  /* Its menu opens over the minimap. */
+  z-index: 3;
 }
 
 .minimap,
 .minimap-toggle {
   position: fixed;
   right: 16px;
-  bottom: 126px;
+  bottom: 70px;
 }
 
 .minimap {
@@ -317,14 +387,6 @@ body {
   min-width: 24px;
   height: 24px;
   opacity: 0.6;
-}
-
-.export-controls {
-  position: fixed;
-  right: 16px;
-  bottom: 70px;
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .notice {
@@ -737,18 +799,6 @@ body {
   }
 }
 
-.comment-controls {
-  position: fixed;
-  left: 12px;
-  bottom: 16px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.panel.comment-controls button[aria-pressed="true"] {
-  background: var(--accent-soft);
-}
-
 .board--placing {
   /* biome-ignore lint/complexity/noImportantStyles: the engine sets the cursor inline as the pointer moves. */
   cursor: crosshair !important;
@@ -867,8 +917,8 @@ body {
 
 .comment-list {
   position: fixed;
-  left: 12px;
-  bottom: 64px;
+  left: 72px;
+  bottom: 16px;
   z-index: 4;
   flex-direction: column;
   align-items: stretch;

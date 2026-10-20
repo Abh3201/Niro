@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { BLUE, drawRectangle, expectPixel, expectStatus, openBoard, TRANSPARENT } from "./helpers";
+import {
+  BLUE,
+  drawRectangle,
+  expectPixel,
+  expectStatus,
+  openBoard,
+  openMenu,
+  TRANSPARENT,
+} from "./helpers";
 
 test("a saved version can be looked at and restored after the shape is deleted", async ({
   page,
@@ -8,6 +16,7 @@ test("a saved version can be looked at and restored after the shape is deleted",
   await drawRectangle(page, { x: 300, y: 200 }, { x: 500, y: 350 });
   await expectStatus(page, 1, 1);
 
+  await openMenu(page, "board-menu");
   await page.getByTestId("history-open").click();
   await expect(page.getByTestId("history-empty")).toBeVisible();
   await page.getByTestId("history-label").fill("With the box");
@@ -25,6 +34,7 @@ test("a saved version can be looked at and restored after the shape is deleted",
   await expectStatus(page, 0, 0);
   await expectPixel(page, 400, 275, TRANSPARENT);
 
+  await openMenu(page, "board-menu");
   await page.getByTestId("history-open").click();
   await page.getByTestId("history-version").filter({ hasText: "With the box" }).click();
   await expect(page.getByTestId("history-preview")).toHaveAttribute("data-state", "ready");
@@ -46,6 +56,7 @@ test("someone with a view link can look at versions but not save or restore", as
 }) => {
   await openBoard(page);
   await drawRectangle(page, { x: 300, y: 200 }, { x: 500, y: 350 });
+  await openMenu(page, "board-menu");
   await page.getByTestId("history-open").click();
   await page.getByTestId("history-save").click();
   await expect(page.getByTestId("history-version")).toHaveCount(1);
@@ -60,6 +71,7 @@ test("someone with a view link can look at versions but not save or restore", as
   const viewer = await browser.newPage();
   await viewer.goto(`${page.url().split("#")[0]}#k=${viewKey}`);
   await expect(viewer.getByTestId("board")).toHaveAttribute("data-ready", "true");
+  await openMenu(viewer, "board-menu");
   await viewer.getByTestId("history-open").click();
   await expect(viewer.getByTestId("history-version")).toHaveCount(1);
   await expect(viewer.getByTestId("history-save")).toHaveCount(0);

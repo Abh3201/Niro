@@ -35,8 +35,16 @@ const TOOLS: ReadonlyArray<{ tool: ToolName; label: string; key: string; icon: R
 /** The tools a board that can't be edited still has. */
 const VIEW_TOOLS: readonly ToolName[] = ["select", "hand", "laser"];
 
-/** Tool picker and the image button, plus undo and redo underneath. */
-export function Toolbar({ engine, onImage }: { engine: Engine; onImage(file: File): void }) {
+/** Tool picker, the image button and the comments menu, plus undo and redo underneath. */
+export function Toolbar({
+  engine,
+  onImage,
+  comments,
+}: {
+  engine: Engine;
+  onImage(file: File): void;
+  comments: ReactNode;
+}) {
   const fileInput = useRef<HTMLInputElement>(null);
   const active = useEngineState(engine, (s) => s.tool, "select");
   const readOnly = useEngineState(engine, (s) => s.readOnly, false);
@@ -86,6 +94,7 @@ export function Toolbar({ engine, onImage }: { engine: Engine; onImage(file: Fil
             />
           </>
         )}
+        {comments}
       </div>
       <div className="panel tools" role="toolbar" aria-label="History" aria-orientation="vertical">
         <button

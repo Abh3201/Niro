@@ -87,6 +87,16 @@ export async function openBoard(page: Page): Promise<void> {
   await waitUntilLive(page);
 }
 
+/**
+ * Opens one of the board's menus ("comments-menu" in the tool bar, "board-menu"
+ * bottom right) with a click, unless it is already open.
+ */
+export async function openMenu(page: Page, testId: "comments-menu" | "board-menu"): Promise<void> {
+  const button = page.getByTestId(testId);
+  if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+}
+
 /** Waits until the engine is running and connected to the realtime server. */
 export async function waitUntilLive(page: Page): Promise<void> {
   await expect(page.getByTestId("board")).toHaveAttribute("data-ready", "true");

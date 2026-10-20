@@ -224,6 +224,27 @@ export const HeadSampleIcon = ({ head }: { head: "none" | "end" | "start" | "bot
   </Icon>
 );
 
+export const CommentIcon = () => (
+  <Icon>
+    <path d="M4 4.5h12a1 1 0 011 1v7a1 1 0 01-1 1H9l-3.5 3v-3H4a1 1 0 01-1-1v-7a1 1 0 011-1z" />
+  </Icon>
+);
+
+export const MoreIcon = () => (
+  <Icon>
+    <circle cx="5" cy="10" r="0.6" fill="currentColor" />
+    <circle cx="10" cy="10" r="0.6" fill="currentColor" />
+    <circle cx="15" cy="10" r="0.6" fill="currentColor" />
+  </Icon>
+);
+
+export const TextFormatIcon = () => (
+  <Icon>
+    <path d="M3 15l3.5-10 3.5 10M4.3 11.5h4.4" />
+    <path d="M13.5 9.5c.4-.6 1-.9 1.8-.9 1.1 0 1.7.6 1.7 1.7V15m0-3.2c-.6-.3-1.2-.4-1.9-.4-1.2 0-2.1.6-2.1 1.8 0 1 .7 1.8 1.8 1.8.9 0 1.6-.5 2.2-1.2" />
+  </Icon>
+);
+
 export const MapIcon = () => (
   <Icon>
     <path d="M3 5.5l4-1.5 6 2 4-1.5v10l-4 1.5-6-2-4 1.5z" />

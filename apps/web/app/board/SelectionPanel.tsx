@@ -22,7 +22,7 @@ import {
   type ReactionSummary,
   type TextStyle,
 } from "@niro/engine";
-import type { MouseEvent } from "react";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlignIcon,
   BringForwardIcon,
@@ -35,6 +35,7 @@ import {
   SendBackwardIcon,
   SendToBackIcon,
   StrokeSampleIcon,
+  TextFormatIcon,
   TrashIcon,
   UngroupIcon,
   UnlockIcon,
@@ -44,6 +45,54 @@ import { useDarkTheme } from "./theme";
 import { useEngineState } from "./useEngineState";
 
 const NO_SELECTION: readonly string[] = [];
+const TEXT_BAR_KEY = "niro.textBar";
+
+type TextBarChoice = "open" | "closed";
+
+function storedTextBar(): TextBarChoice | null {
+  try {
+    const saved = localStorage.getItem(TEXT_BAR_KEY);
+    return saved === "open" || saved === "closed" ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberTextBar(choice: TextBarChoice) {
+  try {
+    localStorage.setItem(TEXT_BAR_KEY, choice);
+  } catch {
+    // Not remembered; the bar starts open again next visit.
+  }
+}
+
+/**
+ * Whether the text formatting bar is open. The first time a browser selects
+ * text the bar shows, so people find it; after that it starts folded away
+ * behind one button in the selection bar, until someone opens it and so
+ * chooses to keep it open.
+ */
+function useTextBar(showing: boolean): [open: boolean, toggle: () => void] {
+  const [choice, setChoice] = useState(storedTextBar);
+  const shown = useRef(false);
+  useEffect(() => {
+    if (choice !== null) return;
+    if (showing && !shown.current) {
+      shown.current = true;
+      // Folded on the next visit even if this one ends with text still selected.
+      rememberTextBar("closed");
+    } else if (!showing && shown.current) {
+      setChoice("closed");
+    }
+  }, [showing, choice]);
+  const open = choice !== "closed";
+  const toggle = useCallback(() => {
+    const next = open ? "closed" : "open";
+    setChoice(next);
+    rememberTextBar(next);
+  }, [open]);
+  return [open, toggle];
+}
 const NO_REACTIONS: readonly ReactionSummary[] = [];
 
 /**
@@ -62,6 +111,8 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
   const text = useEngineState(engine, (s) => s.selectionText, null);
   // Swatches show each color the way the board draws it in this theme.
   const palette = useDarkTheme() ? DARK_PALETTE : LIGHT_PALETTE;
+  const hasText = text !== null && selection.length > 0 && !readOnly && !locked;
+  const [textBarOpen, toggleTextBar] = useTextBar(hasText);
   if (selection.length === 0 || readOnly) return null;
 
   const reactionButtons = (
@@ -135,6 +186,27 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
             />
           ))}
         </fieldset>
+        {text && (
+          <>
+            <span className="divider" />
+            <button
+              type="button"
+              aria-expanded={textBarOpen}
+              aria-controls="text-panel"
+              aria-label="Text formatting"
+              title={
+                textBarOpen
+                  ? "Hide text formatting"
+                  : "Text formatting: font, size, style, alignment and color"
+              }
+              data-testid="text-format-toggle"
+              className={textBarOpen ? "active" : undefined}
+              onClick={toggleTextBar}
+            >
+              <TextFormatIcon />
+            </button>
+          </>
+        )}
         <span className="divider" />
         <button
           type="button"
@@ -292,7 +364,7 @@ export function SelectionPanel({ engine }: { engine: Engine }) {
           </fieldset>
         </div>
       )}
-      {text && <TextPanel engine={engine} text={text} palette={palette} />}
+      {text && textBarOpen && <TextPanel engine={engine} text={text} palette={palette} />}
     </>
   );
 }
@@ -334,7 +406,12 @@ function TextPanel({
     { style: "strike", label: "Strikethrough", key: "", glyph: <s>S</s> },
   ] as const;
   return (
-    <div className="panel selection-panel text-panel" role="toolbar" aria-label="Text">
+    <div
+      id="text-panel"
+      className="panel selection-panel text-panel"
+      role="toolbar"
+      aria-label="Text"
+    >
       <select
         aria-label="Font"
         title="Font"
