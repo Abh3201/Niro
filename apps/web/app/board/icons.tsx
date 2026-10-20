@@ -31,6 +31,14 @@ export const HandIcon = () => (
   </Icon>
 );
 
+export const LaserIcon = () => (
+  <Icon>
+    <circle cx="14" cy="6" r="2.2" />
+    <path d="M12.4 7.6L3.5 16.5" />
+    <path d="M6.5 13.5L5 12M9 11l-1.5-1.5" opacity="0.5" />
+  </Icon>
+);
+
 export const StickyIcon = () => (
   <Icon>
     <path d="M4 4h12v8l-4 4H4z" />

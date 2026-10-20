@@ -24,6 +24,7 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Keyboard | `Tab` / Shift + `Tab` step through shapes in reading order (frames, then what's in them), and past the last shape on to the rest of the page. `?` lists every shortcut. Screen readers announce the selected shape and can read a list of the board's shapes |
 | Add an image | The image button in the toolbar, paste one (Ctrl/Cmd + `V`), or drop a file on the board. PNG, JPEG, GIF or WebP; big pictures are shrunk to 2048 pixels. Resizing keeps its proportions; Shift lets them go |
 | React | Select shapes and pick an emoji in the panel at the top: 👍 ❤️ 😂 🎉 😮 👀. Everyone sees the counts under the shape; pick it again to take yours back |
+| Follow, point | Click someone's avatar (top right) to see what they see; panning or zooming yourself stops it. `K` picks the laser pointer: hold and drag, and everyone sees a trail that fades (view-only visitors can use it too) |
 | Share | **Share**, top right: an edit link and a view-only link, and your name as others see it. Whoever has a link has that access; there are no accounts |
 
 ## Run it with Docker

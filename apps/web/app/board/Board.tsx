@@ -51,6 +51,8 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
         const engine = createEngine(container, {
           doc: board.store,
           onPointerMove: board.presence.pointerMoved,
+          onLaser: board.presence.laserMoved,
+          onView: board.presence.viewChanged,
           loadImage: board.assets.load,
           userId: loadUserId(),
 
@@ -167,7 +169,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
           <SelectionPanel engine={session.engine} />
           <ZoomControls engine={session.engine} onHelp={openHelp} />
           <ExportControls engine={session.engine} />
-          <PresenceBar boardId={boardId} board={session.board} />
+          <PresenceBar boardId={boardId} board={session.board} engine={session.engine} />
           <BoardStatus engine={session.engine} board={session.board} />
         </>
       )}

@@ -1,8 +1,10 @@
+import type { Engine } from "@niro/engine";
 import type { SyncStatus } from "@niro/sync";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { shareLink } from "./access";
 import type { OpenBoard } from "./open-board";
 import { MAX_NAME_LENGTH, type Person } from "./presence";
+import { useEngineState } from "./useEngineState";
 
 const STATUS_LABEL: Record<SyncStatus, string> = {
   online: "Live",
@@ -16,7 +18,16 @@ const MAX_AVATARS = 5;
 const NOBODY: readonly Person[] = [];
 
 /** Top right: connection status, who's here, and sharing. */
-export function PresenceBar({ boardId, board }: { boardId: string; board: OpenBoard }) {
+export function PresenceBar({
+  boardId,
+  board,
+  engine,
+}: {
+  boardId: string;
+  board: OpenBoard;
+  engine: Engine;
+}) {
+  const following = useEngineState(engine, (s) => s.following, null);
   const status = useSyncExternalStore<SyncStatus>(
     board.status.subscribe,
     board.status.get,
@@ -44,20 +55,48 @@ export function PresenceBar({ boardId, board }: { boardId: string; board: OpenBo
         )}
         <ul className="avatars" aria-label="People on this board">
           {shown.map((person) => (
-            <li
-              key={person.id}
-              className="avatar"
-              style={{ background: person.color }}
-              title={person.self ? `${person.name} (you)` : person.name}
-              data-testid={person.self ? "avatar-self" : "avatar"}
-            >
-              <span aria-hidden="true">{initials(person.name)}</span>
-              <span className="visually-hidden">
-                {person.self ? `${person.name} (you)` : person.name}
-              </span>
+            <li key={person.id} className="avatar-item">
+              {person.self ? (
+                <span
+                  className="avatar"
+                  style={{ background: person.color }}
+                  title={`${person.name} (you)`}
+                  data-testid="avatar-self"
+                >
+                  <span aria-hidden="true">{initials(person.name)}</span>
+                  <span className="visually-hidden">{`${person.name} (you)`}</span>
+                </span>
+              ) : (
+                // Click someone's avatar to see what they see.
+                <button
+                  type="button"
+                  className="avatar"
+                  style={{ background: person.color }}
+                  title={
+                    following === person.id
+                      ? `Stop following ${person.name}`
+                      : `Follow ${person.name}`
+                  }
+                  aria-pressed={following === person.id}
+                  data-testid="avatar"
+                  data-following={following === person.id}
+                  onClick={() => engine.follow(following === person.id ? null : person.id)}
+                >
+                  <span aria-hidden="true">{initials(person.name)}</span>
+                  <span className="visually-hidden">
+                    {following === person.id
+                      ? `Stop following ${person.name}`
+                      : `Follow ${person.name}`}
+                  </span>
+                </button>
+              )}
             </li>
           ))}
-          {hidden > 0 && <li className="avatar more">+{hidden}</li>}
+          {hidden > 0 && (
+            <li className="avatar-item">
+              <span className="avatar more">+{hidden}</span>
+            </li>
+          )}
         </ul>
         <button
           type="button"
@@ -69,6 +108,14 @@ export function PresenceBar({ boardId, board }: { boardId: string; board: OpenBo
           Share
         </button>
       </div>
+      {following !== null && (
+        <div className="panel following" role="status" data-testid="following">
+          <span>Following {people.find((p) => p.id === following)?.name ?? "someone"}</span>
+          <button type="button" onClick={() => engine.follow(null)} data-testid="stop-following">
+            Stop
+          </button>
+        </div>
+      )}
       {sharing && <SharePanel boardId={boardId} board={board} onClose={() => setSharing(false)} />}
     </div>
   );
