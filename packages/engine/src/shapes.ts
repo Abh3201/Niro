@@ -1,4 +1,5 @@
 import { isLinear, type Shape } from "@niro/doc";
+import { linePoints } from "./elbow";
 import { hitStroke } from "./freehand";
 import {
   type Box,
@@ -6,6 +7,7 @@ import {
   distanceToSegment,
   type Point,
   polygonIntersectsBox,
+  polylineIntersectsBox,
   rotateAround,
 } from "./geometry";
 import { LINE_WIDTH, lineWidthOf } from "./line-style";
@@ -24,9 +26,9 @@ export function lineEnds(shape: Shape): [Point, Point] {
   ];
 }
 
-/** Corners of a box shape after rotation, clockwise from the top-left; a line's or arrow's two ends. */
+/** Corners of a box shape after rotation, clockwise from the top-left; the points a line or arrow runs through. */
 export function shapeOutline(shape: Shape): Point[] {
-  if (isLinear(shape.type)) return lineEnds(shape);
+  if (isLinear(shape.type)) return [...linePoints(shape)];
   const { x, y, w, h, rotation } = shape;
   const center = shapeCenter(shape);
   return [
@@ -65,11 +67,13 @@ export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
   // A group is picked through what's in it.
   if (shape.type === "group") return false;
   if (isLinear(shape.type)) {
-    const [a, b] = lineEnds(shape);
     // A thicker line is wider to hit than the default one the tolerance is for.
-    return (
-      distanceToSegment(p, a, b) <= tolerance + Math.max(0, (lineWidthOf(shape) - LINE_WIDTH) / 2)
-    );
+    const reach = tolerance + Math.max(0, (lineWidthOf(shape) - LINE_WIDTH) / 2);
+    const points = linePoints(shape);
+    for (let i = 0; i + 1 < points.length; i++) {
+      if (distanceToSegment(p, points[i] as Point, points[i + 1] as Point) <= reach) return true;
+    }
+    return false;
   }
   const local = toShapeFrame(shape, p);
   const rx = shape.w / 2 + tolerance;
@@ -97,5 +101,6 @@ export function hitShape(shape: Shape, p: Point, tolerance: number): boolean {
  * when only the box's corner region is touched.
  */
 export function shapeIntersectsBox(shape: Shape, box: Box): boolean {
+  if (isLinear(shape.type)) return polylineIntersectsBox(linePoints(shape), box);
   return polygonIntersectsBox(shapeOutline(shape), box);
 }

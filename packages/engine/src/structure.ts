@@ -8,6 +8,7 @@ import {
   isLinear,
   type LineDash,
   type LineHead,
+  type LineRoute,
   type LineThickness,
   newShapeId,
   reorderStep,
@@ -136,6 +137,10 @@ export interface LineStyle {
   readonly dash: LineDash | null;
   readonly thickness: LineThickness | null;
   readonly head: LineHead | null;
+  /** How the arrows are routed, or null when they differ or something selected isn't an arrow. */
+  readonly route: LineRoute | null;
+  /** Every shape is an arrow, so routing can be changed. */
+  readonly routable: boolean;
 }
 
 /**
@@ -153,6 +158,8 @@ export function sharedLineStyle(scene: Scene, ids: Iterable<ShapeId>): LineStyle
     dash: common((s) => s.dash ?? "solid"),
     thickness: common((s) => s.thickness ?? "medium"),
     head: common((s) => s.head ?? defaultHead(s.type)),
+    route: targets.every((s) => s.type === "arrow") ? common((s) => s.route ?? "straight") : null,
+    routable: targets.every((s) => s.type === "arrow"),
   };
 }
 

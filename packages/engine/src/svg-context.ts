@@ -18,6 +18,7 @@ interface State {
   strokeStyle: string;
   lineWidth: number;
   lineCap: CanvasLineCap;
+  lineJoin: CanvasLineJoin;
   /** Lengths of dashes and gaps, as `setLineDash` takes them. */
   dash: number[];
   globalAlpha: number;
@@ -71,6 +72,7 @@ export class SvgContext {
     strokeStyle: "#000",
     lineWidth: 1,
     lineCap: "butt",
+    lineJoin: "miter",
     dash: [],
     globalAlpha: 1,
     font: "10px sans-serif",
@@ -106,6 +108,12 @@ export class SvgContext {
   }
   set lineCap(value: CanvasLineCap) {
     this.state.lineCap = value;
+  }
+  get lineJoin(): CanvasLineJoin {
+    return this.state.lineJoin;
+  }
+  set lineJoin(value: CanvasLineJoin) {
+    this.state.lineJoin = value;
   }
   setLineDash(dash: number[]): void {
     this.state.dash = [...dash];
@@ -280,12 +288,13 @@ export class SvgContext {
   }
 
   private paint(kind: "fill" | "stroke"): string {
-    const { globalAlpha, strokeStyle, lineWidth, lineCap, fillStyle, dash } = this.state;
+    const { globalAlpha, strokeStyle, lineWidth, lineCap, lineJoin, fillStyle, dash } = this.state;
     const alpha = globalAlpha < 1 ? ` opacity="${n(globalAlpha)}"` : "";
     if (kind === "fill") return ` fill="${xml(fillStyle)}"${alpha}`;
     const cap = lineCap === "butt" ? "" : ` stroke-linecap="${lineCap}"`;
+    const join = lineJoin === "miter" ? "" : ` stroke-linejoin="${lineJoin}"`;
     const dashes = dash.length > 0 ? ` stroke-dasharray="${dash.map(n).join(" ")}"` : "";
-    return ` stroke="${xml(strokeStyle)}" stroke-width="${n(lineWidth)}"${cap}${dashes}${alpha}`;
+    return ` stroke="${xml(strokeStyle)}" stroke-width="${n(lineWidth)}"${cap}${join}${dashes}${alpha}`;
   }
 
   private box(x: number, y: number, w: number, h: number): string {

@@ -255,6 +255,8 @@ describe("sharedLineStyle", () => {
       dash: "dashed",
       thickness: null,
       head: "none",
+      route: null,
+      routable: false,
     });
     // An arrow's default head is at its end; a line's is none.
     expect(sharedLineStyle(scene, [id("a"), id("arrow")])?.head).toBeNull();

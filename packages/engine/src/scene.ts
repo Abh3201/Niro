@@ -287,8 +287,11 @@ export class Scene {
     this.shapes.set(shape.id, shape);
     // Placing everything again (after any change to the tree) mostly puts
     // shapes back where they were: those keep their place in the index.
+    // An elbow arrow's path can change with its ends staying put (the shape
+    // it goes around grew), so it's always looked at again.
     if (
       before &&
+      !(shape.type === "arrow" && shape.route === "elbow") &&
       before.x === shape.x &&
       before.y === shape.y &&
       before.w === shape.w &&
@@ -297,7 +300,8 @@ export class Scene {
       before.text === shape.text &&
       // A thicker line or a head at the other end covers a different box.
       before.thickness === shape.thickness &&
-      before.head === shape.head
+      before.head === shape.head &&
+      before.route === shape.route
     )
       return;
     this.unindexed.add(shape.id);
