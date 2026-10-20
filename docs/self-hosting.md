@@ -85,6 +85,8 @@ Set these in `.env`, next to `docker-compose.yml`.
 | `NIRO_MAX_CONNECTIONS` | 2000 | People (browser tabs) on the whole realtime server at once; more are turned away. |
 | `NIRO_MAX_IMAGE_MB` | 5 | Largest image file. Browsers shrink pictures bigger than 2048 pixels or 1 MB before uploading, so few come near it. |
 | `NIRO_MAX_BOARD_IMAGES_MB` | 50 | All of one board's images together, in Postgres. Past it, new images on that board are refused. |
+| `NIRO_MAX_VERSIONS` | 30 | Saved versions kept per board. Past it, the oldest go, those Niro saved by itself first. |
+| `NIRO_MAX_BOARD_VERSIONS_MB` | 25 | All of one board's saved versions together, in Postgres. |
 
 ## Backups
 

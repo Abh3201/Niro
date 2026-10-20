@@ -35,6 +35,8 @@ function peers() {
     if (origin !== "net") Y.applyUpdate(a, update, "net");
   });
   return {
+    docA: a,
+    docB: b,
     a: createYDocStore(a, { captureTimeout: 0 }),
     b: createYDocStore(b, { captureTimeout: 0 }),
   };
@@ -83,6 +85,56 @@ describe("YDocStore", () => {
       [["removed"], "remote"],
     ]);
     expect(logB[1]?.changes[0]).toMatchObject({ shape: { x: 50 }, previous: { x: 0 } });
+  });
+
+  it("restores a saved version as a new edit that collaborators receive and undo reverts", () => {
+    const { a, b, docA } = peers();
+    a.transact((tx) => {
+      tx.add(rect("keep", { text: "hello world" }));
+      tx.add(rect("gone", { x: 5 }));
+    });
+    const saved = Y.encodeStateAsUpdate(docA);
+    a.checkpoint();
+    a.transact((tx) => {
+      tx.update(id("keep"), { x: 300, color: "red" });
+      tx.editText(id("keep"), 5, 0, ",");
+      tx.remove(id("gone"));
+      tx.add(rect("new"));
+    });
+    b.transact((tx) => tx.update(id("keep"), { y: 77 }));
+    a.checkpoint();
+
+    expect(a.restore(saved)).toBe(true);
+    for (const store of [a, b]) {
+      expect([...store.all()].map((s) => s.id).sort()).toEqual(["gone", "keep"]);
+      expect(store.get(id("keep"))).toMatchObject({
+        x: 0,
+        y: 0,
+        color: "blue",
+        text: "hello world",
+      });
+      expect(store.get(id("gone"))?.x).toBe(5);
+    }
+    // One step: undo puts back what was there before the restore.
+    a.undo();
+    expect([...a.all()].map((s) => s.id).sort()).toEqual(["keep", "new"]);
+    expect(a.get(id("keep"))).toMatchObject({ x: 300, y: 77, text: "hello, world" });
+  });
+
+  it("restores nothing to a view-only store or from a newer version", () => {
+    const { a, docA } = peers();
+    a.transact((tx) => tx.add(rect("one")));
+    const saved = Y.encodeStateAsUpdate(docA);
+    a.transact((tx) => tx.add(rect("two")));
+    const newer = new Y.Doc();
+    newer.getMap("meta").set("schemaVersion", SCHEMA_VERSION + 1);
+    expect(a.restore(Y.encodeStateAsUpdate(newer))).toBe(false);
+    expect(a.restore(new Uint8Array([0xff, 0xff]))).toBe(false);
+    expect([...a.all()]).toHaveLength(2);
+    const doc = new Y.Doc();
+    const viewer = createYDocStore(doc, { readOnly: true });
+    expect(viewer.restore(saved)).toBe(false);
+    expect([...viewer.all()]).toHaveLength(0);
   });
 
   it("batches a transaction into one notification", () => {

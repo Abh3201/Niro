@@ -82,7 +82,7 @@ jobs:
         run: curl -fsS http://localhost:8787/healthz | grep -q '"ok"'
       - name: Realtime server set up its tables and serves metrics
         run: |
-          docker compose exec -T postgres psql -U niro -d niro -tAc "SELECT max(version) FROM niro_migrations" | grep -qx 2
+          docker compose exec -T postgres psql -U niro -d niro -tAc "SELECT max(version) FROM niro_migrations" | grep -qx 3
           curl -fsS http://localhost:8787/metrics | grep -q '^niro_rooms 0$'
       - name: The HTTPS setup from docs/self-hosting.md serves the board through Caddy
         # For localhost, Caddy uses a certificate of its own (-k), not Let's Encrypt.

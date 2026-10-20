@@ -361,6 +361,8 @@ describe("limits", () => {
       bytesPerSecond: 1024 * 1024,
       imageBytes: 5 * 1024 * 1024,
       boardImageBytes: 50 * 1024 * 1024,
+      versionsPerBoard: 30,
+      boardVersionBytes: 25 * 1024 * 1024,
     });
   });
 });
