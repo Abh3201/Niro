@@ -14,6 +14,8 @@ export interface RemotePeer {
   readonly selection: readonly ShapeId[];
   /** Where their laser pointer is, in world coordinates, while they hold it down. */
   readonly laser?: Point | null;
+  /** They are presenting: stepping through the frames, with everyone able to follow. */
+  readonly presenting?: boolean;
   /** The part of the board they see, for following them; null while they follow someone themselves. */
   readonly view?: View | null;
 }

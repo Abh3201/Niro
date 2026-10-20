@@ -8,6 +8,7 @@ import { ExportControls } from "./ExportControls";
 import { Minimap } from "./Minimap";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
+import { PresentControls } from "./PresentControls";
 import { loadUserId } from "./presence";
 import { SearchPanel, useSearchKey } from "./SearchPanel";
 import { SelectionPanel } from "./SelectionPanel";
@@ -169,11 +170,11 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
       )}
       {session && (
         <>
-          <Toolbar engine={session.engine} onImage={(file) => void addImage(file)} />
-          <SelectionPanel engine={session.engine} />
-          <ZoomControls engine={session.engine} onHelp={openHelp} />
-          <ExportControls engine={session.engine} />
-          <Minimap engine={session.engine} />
+          <Panels
+            engine={session.engine}
+            onImage={(file) => void addImage(file)}
+            onHelp={openHelp}
+          />
           {searchOpen && (
             <SearchPanel
               engine={session.engine}
@@ -193,6 +194,29 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
         </p>
       )}
       <ShortcutsHelp open={helpOpen} onClose={closeHelp} />
+    </>
+  );
+}
+
+/** The board's controls: all of them but the people bar, which stays out of the way while presenting. */
+function Panels({
+  engine,
+  onImage,
+  onHelp,
+}: {
+  engine: Engine;
+  onImage: (file: File) => void;
+  onHelp: () => void;
+}) {
+  const presenting = useEngineState(engine, (s) => s.presenting !== null, false);
+  if (presenting) return <PresentControls engine={engine} />;
+  return (
+    <>
+      <Toolbar engine={engine} onImage={onImage} />
+      <SelectionPanel engine={engine} />
+      <ZoomControls engine={engine} onHelp={onHelp} />
+      <ExportControls engine={engine} />
+      <Minimap engine={engine} />
     </>
   );
 }

@@ -240,6 +240,22 @@ body {
   color: color-mix(in srgb, var(--panel-fg) 65%, transparent);
 }
 
+.present-controls {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  gap: 4px;
+}
+
+.present-count {
+  min-width: 96px;
+  padding: 0 8px;
+  font-size: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .zoom-controls {
   position: fixed;
   right: 16px;
