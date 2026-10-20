@@ -128,3 +128,27 @@ describe("copy and paste", () => {
     expect(scene.get(copy as ShapeId)?.asset).toBe(other);
   });
 });
+
+describe("pasting onto a sticky note", () => {
+  const note = box("note", 0, 0, { type: "sticky", color: "yellow", w: 200, h: 200 });
+  const image = (name: string, w: number) =>
+    box(name, 0, 0, { type: "image", color: "grey", w, h: w, asset: "a".repeat(64) });
+
+  it("puts strokes and images that fit on the note they land on, and leaves the rest on the board", () => {
+    const { scene, edit } = board([note]);
+    const [small] = edit((tx) => pasteShapes(scene, tx, [image("i", 50)], { x: 100, y: 100 }));
+    expect(scene.parentOf(small as ShapeId)).toBe("note");
+    const [ink] = edit((tx) =>
+      pasteShapes(scene, tx, [box("s", 0, 0, { type: "freehand", points: [0, 0, 50] })], {
+        x: 50,
+        y: 50,
+      }),
+    );
+    expect(scene.parentOf(ink as ShapeId)).toBe("note");
+    const [rect] = edit((tx) => pasteShapes(scene, tx, [box("r", 0, 0)], { x: 100, y: 100 }));
+    expect(scene.parentOf(rect as ShapeId)).toBeNull();
+    // Last: it covers the note, so nothing pasted after it lands on the note.
+    const [big] = edit((tx) => pasteShapes(scene, tx, [image("j", 300)], { x: 100, y: 100 }));
+    expect(scene.parentOf(big as ShapeId)).toBeNull();
+  });
+});

@@ -7,11 +7,12 @@ import {
   duplicate,
   group,
   hasLocked,
-  inkHostAt,
   isLocked,
   movers,
-  placeInk,
+  noteAt,
+  noteFor,
   placeNew,
+  placeOnNote,
   releaseOutside,
   remove,
   reorder,
@@ -410,11 +411,11 @@ describe("ink on sticky notes", () => {
 
   it("finds the note under a point, unless something covers it or it's locked", () => {
     const { scene } = board([note(), box("over", 150, 150, 100, 100, { index: "a1" })]);
-    expect(inkHostAt(scene, { x: 110, y: 110 })).toBe("note");
-    expect(inkHostAt(scene, { x: 160, y: 160 })).toBeNull();
-    expect(inkHostAt(scene, { x: 10, y: 10 })).toBeNull();
+    expect(noteAt(scene, { x: 110, y: 110 })).toBe("note");
+    expect(noteAt(scene, { x: 160, y: 160 })).toBeNull();
+    expect(noteAt(scene, { x: 10, y: 10 })).toBeNull();
     const locked = board([note({ locked: true })]);
-    expect(inkHostAt(locked.scene, { x: 110, y: 110 })).toBeNull();
+    expect(noteAt(locked.scene, { x: 110, y: 110 })).toBeNull();
   });
 
   it("lets ink go when dragged off its note, and join another", () => {
@@ -446,9 +447,29 @@ describe("ink on sticky notes", () => {
 
   it("places new ink on its note, on top", () => {
     const { scene } = board([note(), ink("i", 110, 110, { index: "a1" })]);
-    const placed = placeInk(scene, ink("n", 120, 120), id("note"));
+    const placed = placeOnNote(scene, ink("n", 120, 120), id("note"));
     expect(placed.parentId).toBe("note");
     expect(placed.index > "a1").toBe(true);
-    expect(placeInk(scene, ink("n", 120, 120), null).parentId).toBeNull();
+    expect(placeOnNote(scene, ink("n", 120, 120), null).parentId).toBeNull();
+  });
+
+  it("takes images that fit, and finds the note through what's on it", () => {
+    const picture = (patch: Partial<Shape> = {}) =>
+      box("pic", 120, 120, 50, 50, { type: "image", asset: "a".repeat(64), ...patch });
+    const { scene } = board([note(), picture({ parentId: id("note"), index: "a1" })]);
+    // Ink drawn over an image on a note is the note's.
+    expect(noteAt(scene, { x: 140, y: 140 })).toBe("note");
+    const pic = scene.get(id("pic")) as Shape;
+    const moving = new Set([id("pic")]);
+    expect(reparentOnMove(scene, [pic], moving, 10, 10).size).toBe(0);
+    expect(reparentOnMove(scene, [pic], moving, 300, 0).get(id("pic"))).toMatchObject({
+      parentId: null,
+    });
+    // An image bigger than the note dropped on it stays on the board.
+    const loose = board([note(), picture({ w: 150 })]);
+    expect(noteFor(loose.scene, loose.scene.get(id("pic")) as Shape)).toBeNull();
+    expect(noteFor(loose.scene, { ...pic, parentId: null }, new Set([id("pic")]))).toBe("note");
+    // Rectangles never join a note.
+    expect(noteFor(loose.scene, { ...pic, type: "rectangle" })).toBeNull();
   });
 });

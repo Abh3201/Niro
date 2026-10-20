@@ -19,6 +19,7 @@ The first release: a whiteboard you can run yourself and share by link.
 - Follow mode: click a collaborator's avatar to see what they see. A laser pointer (`K`) leaves a fading trail for everyone, including view-only visitors.
 - Lock shapes against accidental moves, edits and deletes; line and arrow styles (solid, dashed, dotted; thin, medium, thick; heads at either end). Boards use schema 6 or later, so older clients open them read-only.
 - Pen strokes that start on a sticky note belong to it: they move, copy, delete and export with the note (a highlight shows which note the pen will write on; hold Alt as you start to draw on the board instead). Boards use schema 7. Marks drawn earlier stay on the board.
+- Images go on sticky notes too: an image pasted or added while one note is selected, or dropped on a note, is shrunk to fit it, set in its middle and moves with it. An image dragged onto a note joins it when it's no bigger than the note; copied strokes and images pasted onto a note join it the same way.
 - Search: Ctrl/⌘ + F finds text in notes, shapes, text and frame names, outlines every match and steps through them with Enter.
 - Minimap: the whole board drawn small in the corner, with the part on screen outlined; click or drag it to move there, or hide it (the choice is remembered).
 - Presentation mode: the Present button (Shift Alt P) steps through the frames in reading order with the arrow keys, Page Up and Down or the on-screen buttons. Others see who is presenting and can follow with one click.

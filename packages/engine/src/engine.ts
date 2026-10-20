@@ -55,8 +55,9 @@ import {
   isLocked,
   type LineStyle,
   movers,
+  noteAt,
   outermost,
-  placeNew,
+  placeOnNote,
   remove,
   reorder,
   reparentOnMove,
@@ -332,6 +333,8 @@ const REVEAL_MIN_ZOOM = 0.5;
 const MAX_PASTED_TEXT_WIDTH = 640;
 /** Largest share of the screen a new image takes up, across or down. */
 const IMAGE_SCREEN_SHARE = 0.6;
+/** Largest share of a sticky note an image put on it takes up, across or down. */
+const NOTE_IMAGE_SHARE = 0.9;
 
 /** The tools that work on a board that can't be edited. */
 const VIEW_TOOLS: ReadonlySet<ToolName> = new Set(["select", "hand", "laser"]);
@@ -1164,18 +1167,46 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     paste([{ ...draft, ...withHeight(draft, layouts.fittedHeight(draft)) }]);
   };
 
+  /**
+   * The sticky note a new image goes on: for a drop, the one it's dropped
+   * on; for a paste or the toolbar, the one note selected. Null for the
+   * board. Where the pointer happens to rest when pasting doesn't count: a
+   * screenshot pasted with the pointer over a note isn't meant to shrink
+   * onto it.
+   */
+  const imageNote = (at?: Point): ShapeId | null => {
+    if (at) return noteAt(scene, screenToWorld(state.camera, at));
+    const [only, ...rest] = state.selection;
+    return only !== undefined &&
+      rest.length === 0 &&
+      scene.get(only)?.type === "sticky" &&
+      !isLocked(scene, only)
+      ? only
+      : null;
+  };
+
   const insertImage = (asset: string, size: ImageSize, at?: Point) => {
     if (doc.readOnly || !(size.width > 0) || !(size.height > 0)) return;
     const { camera, viewport } = state;
-    const center = screenToWorld(camera, at ?? viewportCenter());
-    // As big as the file, in screen pixels, unless that's more than fits.
+    const noteId = imageNote(at);
+    const note = noteId === null ? undefined : scene.get(noteId);
+    // As big as the file, in screen pixels, unless that's more than fits on
+    // the screen, or on the note it goes on.
     const fit = Math.min(
       1,
       (viewport.width * IMAGE_SCREEN_SHARE) / size.width,
       (viewport.height * IMAGE_SCREEN_SHARE) / size.height,
+      ...(note
+        ? [
+            (note.w * NOTE_IMAGE_SHARE * camera.zoom) / size.width,
+            (note.h * NOTE_IMAGE_SHARE * camera.zoom) / size.height,
+          ]
+        : []),
     );
     const w = Math.max(1, (size.width * fit) / camera.zoom);
     const h = Math.max(1, (size.height * fit) / camera.zoom);
+    // On a note, in its middle and turned with it; else where it was put.
+    const center = note ? shapeCenter(note) : screenToWorld(camera, at ?? viewportCenter());
     const draft: Shape = {
       id: newShapeId(),
       type: "image",
@@ -1183,7 +1214,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       y: center.y - h / 2,
       w,
       h,
-      rotation: 0,
+      rotation: note?.rotation ?? 0,
       parentId: null,
       index: "a0",
       color: DEFAULT_COLOR.image,
@@ -1193,7 +1224,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       to: null,
       asset,
     };
-    const shape = { ...draft, ...placeNew(scene, draft) };
+    const shape = { ...draft, ...placeOnNote(scene, draft, noteId) };
     interaction.cancel();
     command((tx) => tx.add(shape));
     if (state.tool !== "select") setTool("select");

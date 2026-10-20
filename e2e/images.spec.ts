@@ -1,5 +1,13 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import { expectPixel, expectStatus, openBoard, RED, waitUntilLive } from "./helpers";
+import {
+  drag,
+  expectPixel,
+  expectStatus,
+  openBoard,
+  RED,
+  TRANSPARENT,
+  waitUntilLive,
+} from "./helpers";
 
 async function person(browser: Browser) {
   const context = await browser.newContext();
@@ -81,4 +89,36 @@ test("a pasted image is added, and a file that isn't an image is refused", async
   );
   await expectStatus(page, 1, 1);
   await expectPixel(page, 640, 360, RED);
+});
+
+test("an image pasted with a sticky note selected goes on the note and moves with it", async ({
+  page,
+}) => {
+  await openBoard(page);
+  await page.getByTestId("tool-sticky").click();
+  await page.mouse.click(400, 400);
+  await page.keyboard.press("Escape");
+  // The note spans about 300 to 500; select it.
+  await page.mouse.click(320, 320);
+  await expectStatus(page, 1, 1);
+
+  // Much bigger than the note: it's shrunk to fit on it, in its middle.
+  const png = await solidPng(page, 600, 400, "#ef4444");
+  await page.evaluate(
+    async (bytes) => {
+      const file = new File([new Uint8Array(bytes)], "pasted.png", { type: "image/png" });
+      const data = new DataTransfer();
+      data.items.add(file);
+      window.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data }));
+    },
+    [...png],
+  );
+  await expectStatus(page, 2, 1);
+  await expectPixel(page, 400, 400, RED);
+  await expectPixel(page, 600, 400, TRANSPARENT);
+
+  // Moving the note by its paper takes the image along.
+  await page.keyboard.press("Escape");
+  await drag(page, { x: 320, y: 320 }, { x: 320, y: 470 }, 10);
+  await expectPixel(page, 400, 550, RED);
 });
