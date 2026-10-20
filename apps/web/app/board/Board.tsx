@@ -8,6 +8,7 @@ import { ExportControls } from "./ExportControls";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
 import { loadUserId } from "./presence";
+import { SearchPanel, useSearchKey } from "./SearchPanel";
 import { SelectionPanel } from "./SelectionPanel";
 import { ShortcutsHelp, useHelpKey } from "./ShortcutsHelp";
 import { Toolbar } from "./Toolbar";
@@ -31,9 +32,11 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
   const [failed, setFailed] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [imageNotice, setImageNotice] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const openHelp = useCallback(() => setHelpOpen(true), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
   useHelpKey(openHelp);
+  useSearchKey(useCallback(() => setSearchOpen(true), []));
   const theme = useThemeChoice();
 
   useEffect(() => {
@@ -169,6 +172,15 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
           <SelectionPanel engine={session.engine} />
           <ZoomControls engine={session.engine} onHelp={openHelp} />
           <ExportControls engine={session.engine} />
+          {searchOpen && (
+            <SearchPanel
+              engine={session.engine}
+              onClose={() => {
+                setSearchOpen(false);
+                containerRef.current?.focus();
+              }}
+            />
+          )}
           <PresenceBar boardId={boardId} board={session.board} engine={session.engine} />
           <BoardStatus engine={session.engine} board={session.board} />
         </>

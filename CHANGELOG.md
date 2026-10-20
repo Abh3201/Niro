@@ -19,6 +19,7 @@ The first release: a whiteboard you can run yourself and share by link.
 - Follow mode: click a collaborator's avatar to see what they see. A laser pointer (`K`) leaves a fading trail for everyone, including view-only visitors.
 - Lock shapes against accidental moves, edits and deletes; line and arrow styles (solid, dashed, dotted; thin, medium, thick; heads at either end). Boards use schema 6 or later, so older clients open them read-only.
 - Pen strokes that start on a sticky note belong to it: they move, copy, delete and export with the note (a highlight shows which note the pen will write on; hold Alt as you start to draw on the board instead). Boards use schema 7. Marks drawn earlier stay on the board.
+- Search: Ctrl/⌘ + F finds text in notes, shapes, text and frame names, outlines every match and steps through them with Enter.
 - Emoji reactions on any shape, shown under it for everyone.
 - Pan and zoom with a mouse, a trackpad or touch.
 - Export the selection or the whole board as PNG or SVG.

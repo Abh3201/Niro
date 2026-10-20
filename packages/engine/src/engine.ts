@@ -19,6 +19,7 @@ import { transact } from "./board-tx";
 import {
   type Camera,
   centerOn,
+  clampZoom,
   nextZoomStep,
   screenToWorld,
   visibleBounds,
@@ -41,6 +42,7 @@ import { paintShapes } from "./paint";
 import { type RemotePeer, SmoothedCursors } from "./presence";
 import { DARK_PALETTE, drawnExtent, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
+import { searchShapes } from "./search";
 import { HANDLE_SIZE, placeHandles } from "./selection";
 import { shapeBounds, shapeCenter, shapeOutline } from "./shapes";
 import {
@@ -230,6 +232,18 @@ export interface Engine {
   toggleReaction(reaction: ReactionName): void;
   /** Starts editing a shape's text, in place. Lines have none. */
   editText(id: ShapeId): void;
+  /** The shapes whose text contains `query`, top to bottom (see `searchShapes`). */
+  search(query: string): readonly ShapeId[];
+  /**
+   * Outlines `ids` (search results) on the board, in a color of their own;
+   * an empty list takes the outlines away. Local: never sent to anyone.
+   */
+  setHighlights(ids: readonly ShapeId[]): void;
+  /**
+   * Selects shape `id` and brings it into view: the camera glides to it,
+   * zooming only as far as it takes to show all of it and read it.
+   */
+  reveal(id: ShapeId): void;
   /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
   setPeers(peers: readonly RemotePeer[]): void;
   /**
@@ -269,6 +283,8 @@ const FRAME_MS = 1000 / 60;
 const CURSOR_SETTLE_PX = 0.25;
 /** Longest remote name drawn on a cursor label. */
 const MAX_LABEL_CHARS = 24;
+/** Search results are outlined in this. */
+const SEARCH_OUTLINE = "#f59e0b";
 /** Your own laser pointer. */
 const LASER_OWN = "#ef4444";
 /** Behind exported images. */
@@ -278,6 +294,10 @@ const FRAME_PLACEHOLDER = "Frame";
 /** Distance a duplicate is offset from the original, and arrow-key nudges, in world units. */
 const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
+/** How much of the screen a revealed shape fills at most, across or down. */
+const REVEAL_SHARE = 0.6;
+/** A revealed shape is shown at least this big, so its text can be read, unless it is bigger than the screen allows. */
+const REVEAL_MIN_ZOOM = 0.5;
 /** Widest a pasted text shape starts, in world units; longer lines wrap. */
 const MAX_PASTED_TEXT_WIDTH = 640;
 /** Largest share of the screen a new image takes up, across or down. */
@@ -374,6 +394,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   let pendingWrite: (() => void) | null = null;
   const listeners = new Set<() => void>();
   let peers: readonly RemotePeer[] = [];
+  /** Search results outlined on the board. */
+  let highlights: readonly ShapeId[] = [];
   const cursors = new SmoothedCursors();
   /** Timestamp of the last frame while remote cursors are moving; null at rest. */
   let lastFrameAt: number | null = null;
@@ -709,6 +731,18 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       scene.ancestorsOf(id).some((a) => state.selection.includes(a));
     const hoveredShape = hovered && !inSelection(hovered) ? scene.get(hovered) : undefined;
     if (hoveredShape) outlineShape(hoveredShape);
+
+    // Search results.
+    if (highlights.length > 0) {
+      ctx.strokeStyle = SEARCH_OUTLINE;
+      ctx.lineWidth = 3;
+      for (const id of highlights) {
+        const shape = scene.get(id);
+        if (shape) outlineShape(shape);
+      }
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = accent;
+    }
 
     const selected = selectedShapes();
     // A locked selection is outlined with dashes, and has no handles.
@@ -1155,6 +1189,31 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   /** Pans to shape `id` if any of it is off screen. */
+  const setHighlights = (ids: readonly ShapeId[]) => {
+    highlights = ids;
+    markDirty(overlay);
+    schedule();
+  };
+
+  const reveal = (id: ShapeId) => {
+    const shape = scene.get(id);
+    if (!shape) return;
+    setSelection([id]);
+    const { width, height } = state.viewport;
+    if (!(width > 0 && height > 0)) return;
+    stopFollowing();
+    const box = shapeBounds(shape);
+    const fit = Math.min(
+      (width * REVEAL_SHARE) / Math.max(1, box.maxX - box.minX),
+      (height * REVEAL_SHARE) / Math.max(1, box.maxY - box.minY),
+    );
+    // Show all of it, but don't zoom in on a little note, or out of a readable size unless it's huge.
+    const zoom = clampZoom(Math.min(fit, Math.max(state.camera.zoom, REVEAL_MIN_ZOOM)));
+    const center = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+    followTarget = centerOn(center, state.viewport, zoom);
+    schedule();
+  };
+
   const bringIntoView = (id: ShapeId) => {
     const shape = scene.get(id);
     if (!shape) return;
@@ -1341,6 +1400,9 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     insertImage,
     toggleReaction,
     editText,
+    search: (query) => searchShapes(scene, query),
+    setHighlights,
+    reveal,
     setPeers,
     follow,
     undo,

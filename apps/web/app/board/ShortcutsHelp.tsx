@@ -44,6 +44,7 @@ const SECTIONS: ReadonlyArray<{ title: string; rows: ReadonlyArray<[string, stri
       [`${MOD} + = / - / 0`, "Zoom in / out / to 100%"],
       ["Space + drag", "Pan"],
       ["Alt + drag", "Move without snapping to other shapes"],
+      [`${MOD} + F`, "Find text on the board"],
       ["Alt + draw (pen)", "Draw on the board, not on the sticky note under the pen"],
       ["Shift + Alt + L", "Lock or unlock the selected shapes"],
       ["?", "This list"],
