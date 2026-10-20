@@ -99,3 +99,29 @@ test.describe("with a pen on a touch screen", () => {
     expect(await inkPixels(page, { x: 880, y: 580, width: 60, height: 60 })).toBe(0);
   });
 });
+
+test("ink drawn on a sticky note moves with it, and Alt draws on the board instead", async ({
+  page,
+}) => {
+  await page.getByTestId("tool-sticky").click();
+  await page.mouse.click(400, 400);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("p");
+  // Starts on the note (it spans about 300 to 500) and runs past its edge.
+  await drag(page, { x: 330, y: 330 }, { x: 560, y: 330 }, 20);
+  await page.keyboard.down("Alt");
+  await drag(page, { x: 330, y: 460 }, { x: 460, y: 460 }, 20);
+  await page.keyboard.up("Alt");
+  await expectStatus(page, 3, 1);
+  const onBoard = { x: 320, y: 450, width: 150, height: 20 };
+  await expect.poll(() => inkPixels(page, onBoard)).toBeGreaterThan(50);
+
+  await page.keyboard.press("v");
+  // Grab the note by empty paper and move it down 150.
+  await drag(page, { x: 350, y: 380 }, { x: 350, y: 530 }, 10);
+  await expect
+    .poll(() => inkPixels(page, { x: 330, y: 470, width: 220, height: 30 }))
+    .toBeGreaterThan(50);
+  // The Alt stroke stayed on the board.
+  await expect.poll(() => inkPixels(page, onBoard)).toBeGreaterThan(50);
+});

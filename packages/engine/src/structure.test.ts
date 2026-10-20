@@ -7,7 +7,10 @@ import {
   duplicate,
   group,
   hasLocked,
+  inkHostAt,
   isLocked,
+  movers,
+  placeInk,
   placeNew,
   releaseOutside,
   remove,
@@ -371,5 +374,79 @@ describe("frames", () => {
     expect(scene.hit({ x: 50, y: -10 }, 0)?.id).toBe("f");
     expect(scene.frameAt({ x: 60, y: 60 })).toBe("f");
     expect(scene.frameAt({ x: 60, y: 60 }, new Set([id("f")]))).toBeNull();
+  });
+});
+
+describe("ink on sticky notes", () => {
+  const note = (patch: Partial<Shape> = {}) =>
+    box("note", 100, 100, 100, 100, { type: "sticky", color: "yellow", ...patch });
+  const ink = (name: string, x: number, y: number, patch: Partial<Shape> = {}) =>
+    box(name, x, y, 20, 20, {
+      type: "freehand",
+      parentId: id("note"),
+      points: [0, 0, 50],
+      ...patch,
+    });
+
+  it("moves ink with its note, in a frame too", () => {
+    const { scene, edit, stored } = board([
+      frame("f", 0, 0, 500, 500),
+      note({ parentId: id("f") }),
+      ink("i", 110, 110, { parentId: id("note") }),
+    ]);
+    // Stored from the frame's corner, and the note's own children follow it.
+    expect(stored("i")).toMatchObject({ x: 110, y: 110 });
+    edit((tx) => {
+      for (const sid of movers(scene, [id("note")])) {
+        const s = scene.get(sid) as Shape;
+        tx.update(sid, { x: s.x + 30, y: s.y });
+      }
+    });
+    expect(scene.get(id("i"))).toMatchObject({ x: 140, y: 110 });
+    expect(movers(scene, [id("note")])).toEqual([id("note"), id("i")]);
+  });
+
+  it("finds the note under a point, unless something covers it or it's locked", () => {
+    const { scene } = board([note(), box("over", 150, 150, 100, 100, { index: "a1" })]);
+    expect(inkHostAt(scene, { x: 110, y: 110 })).toBe("note");
+    expect(inkHostAt(scene, { x: 160, y: 160 })).toBeNull();
+    expect(inkHostAt(scene, { x: 10, y: 10 })).toBeNull();
+    const locked = board([note({ locked: true })]);
+    expect(inkHostAt(locked.scene, { x: 110, y: 110 })).toBeNull();
+  });
+
+  it("lets ink go when dragged off its note, and join another", () => {
+    const { scene } = board([
+      note(),
+      note({ id: id("other"), x: 400, y: 100 }),
+      ink("i", 110, 110),
+    ]);
+    const stroke = scene.get(id("i")) as Shape;
+    const moving = new Set([id("i")]);
+    expect(reparentOnMove(scene, [stroke], moving, 20, 20).size).toBe(0);
+    expect(reparentOnMove(scene, [stroke], moving, -200, 0).get(id("i"))).toMatchObject({
+      parentId: null,
+    });
+    expect(reparentOnMove(scene, [stroke], moving, 300, 0).get(id("i"))).toMatchObject({
+      parentId: "other",
+    });
+  });
+
+  it("deletes and copies ink with its note", () => {
+    const { scene, edit, doc } = board([note(), ink("i", 110, 110)]);
+    edit((tx) => duplicate(scene, tx, [id("note")], 10));
+    const copies = [...doc.all()].filter((s) => s.type === "freehand" && s.id !== "i");
+    expect(copies).toHaveLength(1);
+    expect(copies[0]?.parentId).not.toBe("note");
+    edit((tx) => remove(scene, tx, [id("note")]));
+    expect([...doc.all()].filter((s) => s.id === "i" || s.id === "note")).toHaveLength(0);
+  });
+
+  it("places new ink on its note, on top", () => {
+    const { scene } = board([note(), ink("i", 110, 110, { index: "a1" })]);
+    const placed = placeInk(scene, ink("n", 120, 120), id("note"));
+    expect(placed.parentId).toBe("note");
+    expect(placed.index > "a1").toBe(true);
+    expect(placeInk(scene, ink("n", 120, 120), null).parentId).toBeNull();
   });
 });

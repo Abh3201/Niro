@@ -36,9 +36,11 @@ import { type Guide, SNAP_PX, snapBox } from "./snapping";
 import {
   adoptInto,
   hasLocked,
+  inkHostAt,
   isLocked,
   movers,
   outermost,
+  placeInk,
   placeNew,
   releaseOutside,
   reparentOnMove,
@@ -194,7 +196,7 @@ type Gesture =
   /** The laser pointer: shown to everyone, never stored. */
   | { kind: "laser" }
   /** A pen stroke, drawn in the overlay until it's finished. */
-  | { kind: "draw"; points: PenPoint[] }
+  | { kind: "draw"; points: PenPoint[]; host: ShapeId | null }
   /** The text tool: a click places a text shape, a drag sets its width. `onto` is a text shape clicked to edit it. */
   | {
       kind: "text";
@@ -216,6 +218,8 @@ export class Interaction {
   private releaseStep: (() => void) | null = null;
   private hoveredId: ShapeId | null = null;
   private hoverCursor = "";
+  /** The sticky note a pen stroke started now would belong to. */
+  private inkHover: ShapeId | null = null;
   /** Guide lines for the snap the current move is making. */
   private snapGuides: readonly Guide[] = [];
 
@@ -241,6 +245,17 @@ export class Interaction {
   /** The pen stroke being drawn, in world coordinates. */
   drawing(): readonly PenPoint[] | null {
     return this.gesture.kind === "draw" ? this.gesture.points : null;
+  }
+
+  /**
+   * The sticky note the pen's ink goes onto: the one a stroke in progress
+   * started on, or the one under the pen. Holding Alt as a stroke starts
+   * puts it on the board instead.
+   */
+  inkTarget(): ShapeId | null {
+    const g = this.gesture;
+    if (g.kind === "draw") return g.host;
+    return g.kind === "idle" && this.host.tool() === "pen" ? this.inkHover : null;
   }
 
   /** The shape the arrow end being dragged would attach to. */
@@ -308,7 +323,8 @@ export class Interaction {
     if (tool === "pen") {
       // Each stroke is its own undo step, however quickly the next follows.
       this.host.doc.checkpoint();
-      this.gesture = { kind: "draw", points: [penPoint(p)] };
+      const host = p.altKey ? null : inkHostAt(this.host.scene, p.world);
+      this.gesture = { kind: "draw", points: [penPoint(p)], host };
       this.host.overlayChanged();
       return true;
     }
@@ -419,6 +435,13 @@ export class Interaction {
     if (this.gesture.kind !== "idle") return;
     let hovered: ShapeId | null = null;
     let cursor = "";
+    if (this.host.tool() === "pen") {
+      const note = p.altKey ? null : inkHostAt(this.host.scene, p.world);
+      if (note !== this.inkHover) {
+        this.inkHover = note;
+        this.host.overlayChanged();
+      }
+    }
     if (this.host.tool() === "select") {
       const frame = this.frame();
       const handle =
@@ -749,7 +772,7 @@ export class Interaction {
   private finishDraw(g: Extract<Gesture, { kind: "draw" }>): void {
     const { host } = this;
     if (g.points.length === 0) return;
-    const stroke = this.newShape(newShapeId(), "freehand", strokeShape(g.points));
+    const stroke = this.newShape(newShapeId(), "freehand", strokeShape(g.points), g.host);
     host.scheduleWrite(() => host.transact((tx) => tx.add(stroke)));
     host.overlayChanged();
   }
@@ -787,8 +810,13 @@ export class Interaction {
     host.startDraft(this.newShape(newShapeId(), "text", geometry));
   }
 
-  /** A new shape, on top, in the frame it's drawn in. */
-  private newShape(id: ShapeId, type: ShapeType, geometry: ShapePatch): Shape {
+  /** A new shape, on top, in the frame it's drawn in, or for ink, on the note it's drawn on. */
+  private newShape(
+    id: ShapeId,
+    type: ShapeType,
+    geometry: ShapePatch,
+    note: ShapeId | null = null,
+  ): Shape {
     const shape: Shape = {
       id,
       type,
@@ -806,7 +834,12 @@ export class Interaction {
       to: null,
       ...geometry,
     };
-    return { ...shape, ...placeNew(this.host.scene, shape) };
+    return {
+      ...shape,
+      ...(type === "freehand"
+        ? placeInk(this.host.scene, shape, note)
+        : placeNew(this.host.scene, shape)),
+    };
   }
 
   private snapshot(ids: readonly ShapeId[]): Map<ShapeId, Shape> {

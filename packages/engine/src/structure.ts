@@ -18,7 +18,7 @@ import {
   type Tx,
 } from "@niro/doc";
 import { asDrawn, detachUnless } from "./arrows";
-import { type Box, boxContainsBox, boxesIntersect, unionBoxes } from "./geometry";
+import { type Box, boxContainsBox, boxesIntersect, type Point, unionBoxes } from "./geometry";
 import type { Scene } from "./scene";
 import { lineEnds, shapeBounds, shapeCenter } from "./shapes";
 import { translate } from "./transform";
@@ -98,8 +98,14 @@ export function withDescendants(scene: Scene, ids: Iterable<ShapeId>): ShapeId[]
 export function movers(scene: Scene, ids: Iterable<ShapeId>): ShapeId[] {
   const result: ShapeId[] = [];
   const visit = (id: ShapeId) => {
-    if (scene.get(id)?.type !== "group") result.push(id);
-    else for (const child of scene.childrenOf(id)) visit(child);
+    const type = scene.get(id)?.type;
+    if (type === "group") {
+      for (const child of scene.childrenOf(id)) visit(child);
+      return;
+    }
+    result.push(id);
+    // Ink on a note is stored where it is, so it's written along with the note.
+    if (type === "sticky") for (const child of scene.childrenOf(id)) visit(child);
   };
   for (const id of outermost(scene, ids)) visit(id);
   return result;
@@ -201,6 +207,21 @@ export function frameFor(
   return frame === scene.frameAt(b, exclude) ? frame : null;
 }
 
+/**
+ * The sticky note a pen stroke put down at `p` belongs to: the topmost
+ * shape under `p` (ink aside), if it's a sticky note that isn't locked and
+ * isn't in `exclude`. A note covered by something else isn't one: you can't
+ * see it there.
+ */
+export function inkHostAt(
+  scene: Scene,
+  p: Point,
+  exclude: ReadonlySet<ShapeId> = new Set(),
+): ShapeId | null {
+  const top = scene.hit(p, 0, (s) => s.type !== "freehand" && !exclude.has(s.id));
+  return top?.type === "sticky" && !isLocked(scene, top.id) ? top.id : null;
+}
+
 /** A key for shape `id` joining `parent`: on top, or for a frame, at the bottom. */
 function joinKey(scene: Scene, parent: ShapeId | null, id: ShapeId): string {
   const siblings = siblingsIn(scene, parent).filter((s) => s.id !== id);
@@ -226,7 +247,13 @@ export function reparentOnMove(
   for (const unit of units) {
     const parent = scene.parentOf(unit.id);
     if (!scene.has(unit.id) || (parent !== null && scene.get(parent)?.type === "group")) continue;
-    const target = frameFor(scene, { ...unit, ...translate(unit, dx, dy) }, moving);
+    const moved = { ...unit, ...translate(unit, dx, dy) };
+    // A stroke follows the note under its center, if any: ink dragged off a
+    // note, or onto one, changes owners.
+    const target =
+      unit.type === "freehand"
+        ? (inkHostAt(scene, shapeCenter(moved), moving) ?? frameFor(scene, moved, moving))
+        : frameFor(scene, moved, moving);
     if (target === parent) continue;
     joining.set(target, [...(joining.get(target) ?? []), unit.id]);
   }
@@ -241,6 +268,17 @@ export function reparentOnMove(
     });
   }
   return patches;
+}
+
+/** Where a new pen stroke goes: on the note it was drawn on, on top, or else where `placeNew` says. */
+export function placeInk(
+  scene: Scene,
+  stroke: Shape,
+  host: ShapeId | null,
+): Pick<Shape, "parentId" | "index"> {
+  if (host === null || !scene.has(host)) return placeNew(scene, stroke);
+  const [index] = indexesAbove(siblingsIn(scene, host), 1);
+  return { parentId: host, index: index as string };
 }
 
 /** Where a new shape goes: in the frame it's in, on top, or for a new frame, at the bottom. */
