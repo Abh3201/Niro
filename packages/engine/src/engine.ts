@@ -41,6 +41,7 @@ import { Layer } from "./layers";
 import { type Overview, overviewOf } from "./overview";
 import { paintShapes } from "./paint";
 import { type RemotePeer, SmoothedCursors } from "./presence";
+import { presentationOrder, slideView } from "./presentation";
 import { DARK_PALETTE, drawnExtent, LIGHT_PALETTE, type Palette } from "./render";
 import { Scene } from "./scene";
 import { searchShapes } from "./search";
@@ -115,6 +116,10 @@ export interface EngineState {
   readonly selectionLabel: string;
   /** Reactions on the selected shapes, added up; empty when nothing is selected. */
   readonly selectionReactions: readonly ReactionSummary[];
+  /** How many frames there are to present: the ones not inside another frame. */
+  readonly presentable: number;
+  /** Which slide (frame) is on screen while presenting, from 0, and how many there are; null when not presenting. */
+  readonly presenting: { readonly index: number; readonly count: number } | null;
 }
 
 /** One reaction on the selection: how many people gave it, and whether you did on every shape. */
@@ -233,6 +238,16 @@ export interface Engine {
   toggleReaction(reaction: ReactionName): void;
   /** Starts editing a shape's text, in place. Lines have none. */
   editText(id: ShapeId): void;
+  /**
+   * Starts presenting: the camera shows one frame at a time, in reading
+   * order, from `from` (a frame) or the first. Collaborators see the same
+   * view and can follow it. Does nothing without frames.
+   */
+  present(from?: ShapeId): void;
+  /** Moves to the next (1) or previous (-1) slide while presenting. */
+  presentStep(direction: 1 | -1): void;
+  /** Leaves the presentation; the camera stays where it is. */
+  stopPresenting(): void;
   /** The shapes whose text contains `query`, top to bottom (see `searchShapes`). */
   search(query: string): readonly ShapeId[];
   /**
@@ -386,6 +401,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     following: null,
     selectionLabel: "",
     selectionReactions: [],
+    presentable: presentationOrder(scene).length,
+    presenting: null,
   };
   let cameraPlaced = options.camera !== undefined;
   let pixelRatio = window.devicePixelRatio || 1;
@@ -567,8 +584,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     if (doc.readOnly && !VIEW_TOOLS.has(state.tool)) setTool("select");
     if (doc.readOnly) editor.stop();
     const selection = state.selection.filter((id) => scene.has(id));
+    // Only changes to frames can change what there is to present.
+    const framesChanged = changes.some(
+      (change) => (change.kind === "removed" ? change.previous : change.shape).type === "frame",
+    );
+    const presentable = framesChanged ? presentationOrder(scene).length : state.presentable;
     setState({
       ...state,
+      presentable,
+      presenting: presentable === 0 ? null : state.presenting,
       selection: selection.length === state.selection.length ? state.selection : selection,
       ...describe(selection),
       shapeCount: scene.size,
@@ -954,6 +978,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       return;
     }
     if (!peers.some((p) => p.id === id)) return;
+    // Presenting and following someone else would pull the view two ways.
+    stopPresenting();
     setState({ ...state, following: id });
     reportView();
     followView(true);
@@ -1195,6 +1221,51 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   };
 
   /** Pans to shape `id` if any of it is off screen. */
+  /** Glides to slide `index` of `order`. */
+  const showSlide = (order: readonly ShapeId[], index: number) => {
+    const id = order[index];
+    const view = id === undefined ? null : slideView(scene, id);
+    const camera = view && followCamera(view, state.viewport);
+    setState({ ...state, presenting: { index, count: order.length } });
+    if (!camera) return;
+    stopFollowing();
+    followTarget = camera;
+    schedule();
+  };
+
+  /** The selected frame, if exactly that is selected: where Present starts. */
+  const frameSelected = (): ShapeId | undefined => {
+    const [only] = state.selection;
+    return state.selection.length === 1 && only && scene.get(only)?.type === "frame"
+      ? only
+      : undefined;
+  };
+
+  const present = (from?: ShapeId) => {
+    const order = presentationOrder(scene);
+    if (order.length === 0) return;
+    interaction.cancel();
+    editor.stop();
+    setTool("select");
+    setSelection([]);
+    showSlide(order, Math.max(0, from === undefined ? 0 : order.indexOf(from)));
+  };
+
+  const presentStep = (direction: 1 | -1) => {
+    if (state.presenting === null) return;
+    const order = presentationOrder(scene);
+    if (order.length === 0) {
+      stopPresenting();
+      return;
+    }
+    const index = Math.min(order.length - 1, Math.max(0, state.presenting.index + direction));
+    showSlide(order, index);
+  };
+
+  function stopPresenting() {
+    if (state.presenting !== null) setState({ ...state, presenting: null });
+  }
+
   const setHighlights = (ids: readonly ShapeId[]) => {
     highlights = ids;
     markDirty(overlay);
@@ -1263,6 +1334,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       return stepSelection(event);
     }
     if (event.key === "Escape") {
+      if (state.presenting !== null) {
+        stopPresenting();
+        return true;
+      }
       if (interaction.cancel()) return true;
       if (state.selection.length > 0) {
         setSelection([]);
@@ -1276,6 +1351,19 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     }
     // Shortcuts would fight with a drag in progress.
     if (interaction.busy()) return false;
+
+    // Presenting: the keys a clicker or a keyboard has for slides.
+    if (state.presenting !== null && !mod && !event.altKey) {
+      if (event.key === "Escape") stopPresenting();
+      else if (["ArrowRight", "ArrowDown", "PageDown", "Enter"].includes(event.key)) presentStep(1);
+      else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(event.key)) presentStep(-1);
+      else return false;
+      return true;
+    }
+    if (event.altKey && event.shiftKey && event.code === "KeyP" && !mod) {
+      present(frameSelected());
+      return true;
+    }
 
     if (mod && !event.altKey) {
       if (key === "z") event.shiftKey ? redo() : undo();
@@ -1409,6 +1497,9 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     insertImage,
     toggleReaction,
     editText,
+    present,
+    presentStep,
+    stopPresenting,
     search: (query) => searchShapes(scene, query),
     setHighlights,
     overview: () => (overviewCache ??= overviewOf(scene, theme.palette)),

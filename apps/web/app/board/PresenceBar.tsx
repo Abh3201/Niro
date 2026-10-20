@@ -38,6 +38,9 @@ export function PresenceBar({
     board.presence.getPeople,
     () => NOBODY,
   );
+  const presenting = useEngineState(engine, (s) => s.presenting !== null, false);
+  // Someone is stepping through the frames: offer to come along (never forced).
+  const presenter = presenting || following !== null ? undefined : people.find((p) => p.presenting);
   const [sharing, setSharing] = useState(false);
   const shown = people.slice(0, MAX_AVATARS);
   const hidden = people.length - shown.length;
@@ -113,6 +116,18 @@ export function PresenceBar({
           <span>Following {people.find((p) => p.id === following)?.name ?? "someone"}</span>
           <button type="button" onClick={() => engine.follow(null)} data-testid="stop-following">
             Stop
+          </button>
+        </div>
+      )}
+      {presenter && (
+        <div className="panel following" role="status" data-testid="presenter-banner">
+          <span>{presenter.name} is presenting</span>
+          <button
+            type="button"
+            onClick={() => engine.follow(presenter.id)}
+            data-testid="follow-presenter"
+          >
+            Follow
           </button>
         </div>
       )}

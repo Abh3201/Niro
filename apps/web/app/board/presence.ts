@@ -12,6 +12,8 @@ export interface Identity {
 export interface Person extends Identity {
   readonly id: number;
   readonly self: boolean;
+  /** Stepping through the frames: everyone can follow. */
+  readonly presenting: boolean;
 }
 
 /**
@@ -147,7 +149,7 @@ function readView(value: unknown): View | null {
 
 function readPeer(id: number, state: unknown): RemotePeer | null {
   if (typeof state !== "object" || state === null) return null;
-  const { user, cursor, selection, laser, view } = state as Record<string, unknown>;
+  const { user, cursor, selection, laser, view, presenting } = state as Record<string, unknown>;
   const identity = readIdentity(user);
   if (!identity) return null;
   return {
@@ -156,6 +158,7 @@ function readPeer(id: number, state: unknown): RemotePeer | null {
     cursor: readPoint(cursor),
     laser: readPoint(laser),
     view: readView(view),
+    presenting: presenting === true,
     selection: Array.isArray(selection)
       ? selection.filter((s): s is RemotePeer["selection"][number] => typeof s === "string")
       : [],
@@ -191,6 +194,7 @@ export class Presence {
       cursor: null,
       laser: null,
       view: null,
+      presenting: false,
       selection: [],
     });
     awareness.on("change", this.onChange);
@@ -201,8 +205,15 @@ export class Presence {
   attach(engine: Engine): () => void {
     this.engine = engine;
     let selection = engine.getState().selection;
+    let presenting = engine.getState().presenting !== null;
     const unsubscribe = engine.subscribe(() => {
-      const next = engine.getState().selection;
+      const state = engine.getState();
+      const nowPresenting = state.presenting !== null;
+      if (nowPresenting !== presenting) {
+        presenting = nowPresenting;
+        this.awareness.setLocalStateField("presenting", presenting);
+      }
+      const next = state.selection;
       if (next === selection) return;
       selection = next;
       this.awareness.setLocalStateField("selection", next.slice(0, MAX_SHARED_SELECTION));
@@ -301,8 +312,14 @@ export class Presence {
   private updatePeople(): void {
     const me = this.identity();
     const people: Person[] = [
-      { id: this.awareness.clientID, ...me, self: true },
-      ...this.peers().map(({ id, name, color }) => ({ id, name, color, self: false })),
+      { id: this.awareness.clientID, ...me, self: true, presenting: false },
+      ...this.peers().map(({ id, name, color, presenting }) => ({
+        id,
+        name,
+        color,
+        self: false,
+        presenting: presenting === true,
+      })),
     ];
     const signature = JSON.stringify(people);
     if (signature === this.peopleSignature) return;
