@@ -558,4 +558,47 @@ describe("groups and frames", () => {
     expect(t.doc.get(line)?.parentId).toBeNull();
     expect(t.doc.get(stroke)?.parentId).toBe(frame);
   });
+
+  describe("ink on sticky notes", () => {
+    const withNote = () => {
+      const t = setup();
+      t.setTool("sticky");
+      t.drag({ x: 100, y: 100 }, { x: 300, y: 300 });
+      const note = [...t.doc.all()][0] as Shape;
+      t.setTool("pen");
+      return { t, note };
+    };
+    const strokes = (t: ReturnType<typeof setup>) =>
+      [...t.doc.all()].filter((s) => s.type === "freehand");
+
+    it("puts a stroke that starts on a note on it, and follows when the note moves", () => {
+      const { t, note } = withNote();
+      t.drag({ x: 150, y: 150 }, { x: 400, y: 200 });
+      const [stroke] = strokes(t) as Shape[];
+      expect(stroke?.parentId).toBe(note.id);
+      const before = t.scene.get(stroke?.id as ShapeId) as Shape;
+      t.setTool("select");
+      t.drag({ x: 120, y: 280 }, { x: 170, y: 330 });
+      const moved = t.scene.get(stroke?.id as ShapeId) as Shape;
+      expect(moved.x - before.x).toBe(50);
+      expect(moved.y - before.y).toBe(50);
+    });
+
+    it("leaves a stroke that starts off the note on the board, and Alt does too", () => {
+      const { t } = withNote();
+      t.drag({ x: 400, y: 150 }, { x: 150, y: 150 });
+      t.drag({ x: 150, y: 200 }, { x: 250, y: 200 }, false, true);
+      expect(strokes(t).map((s) => s.parentId)).toEqual([null, null]);
+    });
+
+    it("shows the note the pen would write on, before and during the stroke", () => {
+      const { t, note } = withNote();
+      t.interaction?.hover(t.pointer({ x: 150, y: 150 }));
+      expect(t.interaction?.inkTarget()).toBe(note.id);
+      t.interaction?.hover(t.pointer({ x: 150, y: 150 }, false, true));
+      expect(t.interaction?.inkTarget()).toBeNull();
+      t.interaction?.hover(t.pointer({ x: 500, y: 500 }));
+      expect(t.interaction?.inkTarget()).toBeNull();
+    });
+  });
 });

@@ -756,6 +756,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       ctx.lineWidth = 1.5;
     }
 
+    // The sticky note the pen's ink goes onto.
+    const note = interaction.inkTarget();
+    const noteShape = note === null ? undefined : scene.get(note);
+    if (noteShape) {
+      ctx.lineWidth = 3;
+      outlineShape(noteShape);
+      ctx.lineWidth = 1.5;
+    }
+
     // A pen stroke being drawn: in the overlay until it's finished.
     const drawing = interaction.drawing();
     if (drawing) {

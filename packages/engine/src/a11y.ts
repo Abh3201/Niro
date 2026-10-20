@@ -74,7 +74,8 @@ export function readingOrder(scene: Scene): ShapeId[] {
     });
     for (const shape of children) {
       result.push(shape.id);
-      if (shape.type === "frame") visit(shape.id);
+      // Frames, and notes with ink on them: what's on them is reached from them.
+      if (shape.type !== "group") visit(shape.id);
     }
   };
   visit(null);
