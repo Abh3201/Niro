@@ -1,7 +1,9 @@
-# Deploy main to Azure App Service after CI passes on it. See docs/deploy-azure.md,
-# "Deploy automatically from GitHub". Does nothing until the repository
-# variables AZURE_WEBAPP_REALTIME and AZURE_WEBAPP_WEB are set.
-name: Deploy to Azure
+# Deploy main after CI passes on it: the realtime server to Azure App Service,
+# and the web app to Azure, Vercel, or both. See docs/deploy-azure.md, "Deploy
+# automatically from GitHub", and docs/deploy-vercel.md. Does nothing until the
+# repository variable AZURE_WEBAPP_REALTIME is set; each web app step also
+# needs its own variable (AZURE_WEBAPP_WEB, VERCEL_PROJECT_ID).
+name: Deploy
 
 on:
   workflow_run:
@@ -22,7 +24,7 @@ jobs:
   deploy:
     name: Build and deploy
     if: >-
-      vars.AZURE_WEBAPP_REALTIME != '' && vars.AZURE_WEBAPP_WEB != '' &&
+      vars.AZURE_WEBAPP_REALTIME != '' &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
@@ -45,12 +47,25 @@ jobs:
           app-name: ${{ vars.AZURE_WEBAPP_REALTIME }}
           publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE_REALTIME }}
           package: out/azure/realtime.zip
-      - name: Deploy the web app
+      - name: Deploy the web app to Azure
+        if: vars.AZURE_WEBAPP_WEB != ''
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.AZURE_WEBAPP_WEB }}
           publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE_WEB }}
           package: out/azure/web.zip
+      # Vercel's own Git deploys are off (apps/web/vercel.json), so the web app
+      # never goes out before CI passes or before the realtime server it talks to.
+      - name: Deploy the web app to Vercel
+        if: vars.VERCEL_PROJECT_ID != ''
+        env:
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --yes vercel@63.1.2 pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes vercel@63.1.2 build --prod --token="$VERCEL_TOKEN"
+          npx --yes vercel@63.1.2 deploy --prebuilt --prod --token="$VERCEL_TOKEN"
       - name: Check the realtime server answers
         run: |
           for _ in 1 2 3 4 5 6; do
