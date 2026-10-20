@@ -3,13 +3,13 @@ import type { Camera } from "./camera";
 import type { Palette } from "./render";
 import { shapeCenter } from "./shapes";
 import {
-  FONT_FAMILY,
   FRAME_LABEL_GAP,
   inkColor,
   LINE_HEIGHT,
   MAX_TEXT_LENGTH,
   MEASURE_SIZE,
   type TextLayouts,
+  textHeight,
   withHeight,
 } from "./text";
 import { applyEdit, diffText, mapPosition, rebaseEdit } from "./text-diff";
@@ -29,6 +29,8 @@ export interface TextEditorHost {
   changed(): void;
   undo(): void;
   redo(): void;
+  /** Ctrl/Cmd + B, I or U while typing: turns bold, italic or underline on or off for the shape. */
+  toggleTextStyle(style: "bold" | "italic" | "underline"): void;
 }
 
 /**
@@ -95,7 +97,6 @@ export class TextEditor {
       background: "transparent",
       whiteSpace: "pre-wrap",
       overflowWrap: "break-word",
-      fontFamily: FONT_FAMILY,
       lineHeight: String(LINE_HEIGHT),
       transformOrigin: "0 0",
       userSelect: "text",
@@ -195,6 +196,18 @@ export class TextEditor {
       this.flush();
       if (key === "y" || event.shiftKey) this.host.redo();
       else this.host.undo();
+    } else if (
+      mod &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !this.name &&
+      !event.isComposing &&
+      (key === "b" || key === "i" || key === "u")
+    ) {
+      // The whole shape's text: formatting is per shape (docs/decisions/0013-text-formatting.md).
+      event.preventDefault();
+      this.flush();
+      this.host.toggleTextStyle(key === "b" ? "bold" : key === "i" ? "italic" : "underline");
     }
   }
 
@@ -288,7 +301,12 @@ export class TextEditor {
     const k = (layout.fontSize * zoom) / MEASURE_SIZE;
     const ink = inkColor(shape, this.host.palette());
     const style = el.style;
-    style.fontSize = `${MEASURE_SIZE}px`;
+    // The same font as the canvas (the shorthand also resets weight and style).
+    style.font = layout.font;
+    style.lineHeight = String(LINE_HEIGHT);
+    style.textDecorationLine =
+      [shape.underline && "underline", shape.strike && "line-through"].filter(Boolean).join(" ") ||
+      "none";
     style.width = `${(layout.width * zoom) / k}px`;
     style.textAlign = layout.align;
     style.color = ink;
@@ -301,14 +319,18 @@ export class TextEditor {
     const height = inner * k;
 
     // Top-left of the text in the shape's frame (text shapes from their top,
-    // a frame's name above it, the rest centered), turned with the shape,
-    // then to screen pixels.
+    // a frame's name above it, the rest where their text sits: at the top,
+    // the bottom, or centered), turned with the shape, then to screen pixels.
     const top =
       shape.type === "text"
         ? (-shape.h / 2) * zoom
         : shape.type === "frame"
           ? (-shape.h / 2 - FRAME_LABEL_GAP) * zoom - height
-          : -height / 2;
+          : shape.valign === "top"
+            ? layout.y * zoom
+            : shape.valign === "bottom"
+              ? (layout.y + textHeight(layout.lines.length, layout.fontSize)) * zoom - height
+              : -height / 2;
     const left = layout.x * zoom;
     const cos = Math.cos(shape.rotation);
     const sin = Math.sin(shape.rotation);

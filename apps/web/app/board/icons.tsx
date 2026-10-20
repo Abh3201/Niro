@@ -241,3 +241,25 @@ export const RouteSampleIcon = ({ route }: { route: "straight" | "elbow" }) => (
     )}
   </Icon>
 );
+
+/** Lines of text set left, centered or right, for the alignment buttons. */
+export const AlignIcon = ({ align }: { align: "left" | "center" | "right" }) => {
+  const short =
+    align === "left" ? "M4 9h8M4 15h8" : align === "right" ? "M8 9h8M8 15h8" : "M6 9h8M6 15h8";
+  return (
+    <Icon>
+      <path d={`M4 6h12M4 12h12${short}`} />
+    </Icon>
+  );
+};
+
+/** A box with its text at the top, middle or bottom, for the vertical alignment buttons. */
+export const VerticalAlignIcon = ({ valign }: { valign: "top" | "middle" | "bottom" }) => {
+  const y = valign === "top" ? 6.5 : valign === "bottom" ? 13.5 : 10;
+  return (
+    <Icon>
+      <rect x="3.5" y="3.5" width="13" height="13" rx="1.5" opacity="0.5" />
+      <path d={`M7 ${y - 1.25}h6M7 ${y + 1.25}h6`} />
+    </Icon>
+  );
+};

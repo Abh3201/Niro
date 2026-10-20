@@ -33,7 +33,7 @@ function input(shapes: Shape[], ids: string[] | null = null): ExportInput {
     ids: ids as ShapeId[] | null,
     palette: LIGHT_PALETTE,
     background: "#ffffff",
-    baseline: 0.8,
+    baseline: () => 0.8,
     textLayout: (s) => (s.text === "" ? undefined : layouts.get(s)),
     stroke: () => undefined,
   };

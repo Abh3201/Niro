@@ -25,7 +25,7 @@ export interface ExportInput {
   readonly palette: Palette;
   /** Fill behind the shapes. */
   readonly background: string;
-  readonly baseline: number;
+  baseline(font: string): number;
   textLayout(shape: Shape): TextLayout | undefined;
   stroke(shape: Shape): Path2D | undefined;
 }

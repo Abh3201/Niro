@@ -27,3 +27,5 @@ export {
 } from "./overview";
 export type { RemotePeer } from "./presence";
 export { DARK_PALETTE, LIGHT_PALETTE, type Palette } from "./render";
+export type { TextStyle, TextStylePatch } from "./structure";
+export { FONT_FAMILIES } from "./text";

@@ -4,13 +4,15 @@ import { PEN_SIZE } from "./freehand";
 import { type Box, boxFromPoints, type Point, rotateAround, unionBoxes } from "./geometry";
 import { reactionsExtent } from "./reactions";
 import { shapeCenter, shapeExtent } from "./shapes";
-import { FONT_FAMILY, inkColor, LINE_HEIGHT, MEASURE_SIZE, type TextLayout } from "./text";
+import { inkColor, LINE_HEIGHT, MEASURE_SIZE, type TextLayout } from "./text";
 
 export interface Palette {
   /** Shape fills and line strokes. */
   solid: Record<ColorName, string>;
   /** Sticky note paper. */
   paper: Record<ColorName, string>;
+  /** Text colors on sticky notes, whose paper is light in both themes. */
+  ink: Record<ColorName, string>;
   /** Selection, handles and marquee. */
   accent: string;
   /** Snap guide lines. */
@@ -45,6 +47,7 @@ const PAPER: Record<ColorName, string> = {
 export const LIGHT_PALETTE: Palette = {
   solid: SOLID,
   paper: PAPER,
+  ink: SOLID,
   accent: "#2563eb",
   guide: "#db2777",
   handleFill: "#ffffff",
@@ -55,6 +58,7 @@ export const DARK_PALETTE: Palette = {
   // "Black" ink has to stay visible on a dark board.
   solid: { ...SOLID, black: "#e4e4e7" },
   paper: PAPER,
+  ink: SOLID,
   accent: "#60a5fa",
   guide: "#f472b6",
   handleFill: "#1e1e24",
@@ -113,7 +117,7 @@ function shapeBoxExtent(shape: Shape, layout?: TextLayout): Box {
 /** A shape's text, laid out, and how to draw it. */
 export interface ShapeText {
   readonly layout: TextLayout;
-  /** `FontMetrics.baseline`. */
+  /** `FontMetrics.baseline` for the layout's font. */
   readonly baseline: number;
   /** Screen pixels per world unit. */
   readonly zoom: number;
@@ -223,7 +227,7 @@ export function drawShape(
   }
   const { text } = extras;
   if (text && text.layout.fontSize * zoom >= HIDE_TEXT_BELOW_PX)
-    drawText(ctx, text, inkColor(shape, palette), cx, cy);
+    drawText(ctx, shape, text, inkColor(shape, palette), cx, cy);
   if (turned) ctx.restore();
 }
 
@@ -287,9 +291,10 @@ function drawHead(
   ctx.fill();
 }
 
-/** Draws laid-out text, centered on `(cx, cy)`: the shape's center. */
+/** Draws laid-out text, centered on `(cx, cy)`: the shape's center, underlined or struck through as `shape` says. */
 function drawText(
   ctx: CanvasRenderingContext2D,
+  shape: Shape,
   text: ShapeText,
   ink: string,
   cx: number,
@@ -300,7 +305,11 @@ function drawText(
   const { fontSize, lines, widths } = layout;
   const lineHeight = fontSize * LINE_HEIGHT;
   const left = (i: number) =>
-    layout.align === "left" ? layout.x : layout.x + (layout.width - (widths[i] ?? 0)) / 2;
+    layout.align === "left"
+      ? layout.x
+      : layout.align === "right"
+        ? layout.x + layout.width - (widths[i] ?? 0)
+        : layout.x + (layout.width - (widths[i] ?? 0)) / 2;
   ctx.fillStyle = ink;
 
   if (fontSize * zoom < GREEK_BELOW_PX) {
@@ -320,8 +329,11 @@ function drawText(
   // Scaling back after is cheaper than save and restore, which add up when
   // thousands of notes are on screen.
   const k = fontSize / MEASURE_SIZE;
+  // A line can't be wider than the room right of where it starts, unless
+  // it's one character that never fit.
+  const room = (i: number) => Math.max(widths[i] ?? 0, layout.x + layout.width - left(i));
   ctx.scale(k, k);
-  ctx.font = `${MEASURE_SIZE}px ${FONT_FAMILY}`;
+  ctx.font = layout.font;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   lines.forEach((line, i) => {
@@ -330,10 +342,21 @@ function drawText(
         line,
         left(i) / k,
         (layout.y + i * lineHeight + baseline * fontSize) / k,
-        // A line can't be wider than the room right of where it starts, unless
-        // it's one character that never fit.
-        Math.max(widths[i] ?? 0, layout.x + layout.width - left(i)) / k,
+        room(i) / k,
       );
   });
   ctx.scale(1 / k, 1 / k);
+
+  // Lines under or through the text, as long as each line's letters, at
+  // about where browsers draw them for most fonts.
+  if (!shape.underline && !shape.strike) return;
+  const thickness = fontSize * (shape.bold ? 0.075 : 0.055);
+  lines.forEach((line, i) => {
+    const width = Math.min(widths[i] ?? 0, room(i));
+    if (line.trim() === "" || width <= 0) return;
+    const base = layout.y + i * lineHeight + baseline * fontSize;
+    if (shape.underline) ctx.fillRect(left(i), base + fontSize * 0.1, width, thickness);
+    if (shape.strike)
+      ctx.fillRect(left(i), base - fontSize * 0.3 - thickness / 2, width, thickness);
+  });
 }

@@ -1,4 +1,12 @@
-import type { Shape, ShapeId, ShapePatch } from "@niro/doc";
+import {
+  defaultAlign,
+  type FontName,
+  type Shape,
+  type ShapeId,
+  type ShapePatch,
+  type TextAlign,
+  takesTextStyle,
+} from "@niro/doc";
 import type { Palette } from "./render";
 
 /**
@@ -20,6 +28,18 @@ import type { Palette } from "./render";
  */
 
 export const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+/**
+ * The font lists each typeface name stands for: fonts already installed on
+ * Windows, macOS and most Linux desktops, then the generic family. Text is
+ * measured with whatever the browser picks, so it fits on every machine,
+ * though a line may break differently from one to another.
+ */
+export const FONT_FAMILIES: Record<FontName, string> = {
+  sans: FONT_FAMILY,
+  serif: 'Georgia, "Times New Roman", Times, serif',
+  mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+  hand: '"Comic Sans MS", "Comic Neue", "Chalkboard SE", "Marker Felt", cursive',
+};
 /** Line spacing, as a multiple of the font size. The editor uses the same. */
 export const LINE_HEIGHT = 1.25;
 /** Font size of text shapes, in world units. */
@@ -40,15 +60,38 @@ export const MAX_TEXT_LENGTH = 10_000;
 const STICKY_INK = "#1e1e24";
 const LIGHT_INK = "#ffffff";
 
-/** Width of `text` set at a font size of 1, in the same units as the font size. */
-export type MeasureText = (text: string) => number;
+/** The CSS font for `MEASURE_SIZE` text with no formatting. */
+export const DEFAULT_FONT = `${MEASURE_SIZE}px ${FONT_FAMILY}`;
+
+/**
+ * Width of `text` set at a font size of 1, in the same units as the font
+ * size, in `font`: a CSS font at `MEASURE_SIZE` (see `cssFont`), plain
+ * text when absent.
+ */
+export type MeasureText = (text: string, font?: string) => number;
+
+/** The CSS font a shape's text is measured, drawn and edited in, at `MEASURE_SIZE`. */
+export function cssFont(shape: Shape): string {
+  if (!takesTextStyle(shape.type) || (!shape.font && !shape.bold && !shape.italic))
+    return DEFAULT_FONT;
+  return `${shape.italic ? "italic " : ""}${shape.bold ? "bold " : ""}${MEASURE_SIZE}px ${FONT_FAMILIES[shape.font ?? "sans"]}`;
+}
+
+/** The size set for a shape's text, or null for automatic. */
+const setSize = (shape: Shape): number | null =>
+  typeof shape.fontSize === "number" && takesTextStyle(shape.type) ? shape.fontSize : null;
+
+/** A text shape's font size: as set, or the usual one. */
+const textShapeSize = (shape: Shape) => setSize(shape) ?? TEXT_FONT_SIZE;
 
 export interface TextLayout {
   readonly fontSize: number;
   readonly lines: readonly string[];
   /** Width of each line at `fontSize`, without the spaces it ends with. */
   readonly widths: readonly number[];
-  readonly align: "left" | "center";
+  readonly align: TextAlign;
+  /** The CSS font, at `MEASURE_SIZE` (see `cssFont`). */
+  readonly font: string;
   /**
    * Where the lines go, in the shape's own frame (origin at its center, axes
    * along its sides, before rotation): the top-left corner of the first
@@ -71,7 +114,7 @@ export function wrapText(
   text: string,
   maxWidth: number,
   fontSize: number,
-  measure: MeasureText,
+  measure: (text: string) => number,
 ): string[] {
   const width = (s: string) => measure(s) * fontSize;
   const lines: string[] = [];
@@ -131,8 +174,10 @@ const FIT_STEPS = 12;
  * and shrink it until it fits; text shapes wrap it at their width, at one
  * size, and grow downward to hold it (see `fittedTextHeight`).
  */
-export function layoutText(shape: Shape, measure: MeasureText): TextLayout {
+export function layoutText(shape: Shape, measureText: MeasureText): TextLayout {
   const { w, h, text } = shape;
+  const font = cssFont(shape);
+  const measure = (s: string) => measureText(s, font);
   if (shape.type === "frame") {
     // A frame's name sits above it, growing upward if it wraps.
     const lines = wrapText(text, w, FRAME_LABEL_SIZE, measure);
@@ -141,18 +186,22 @@ export function layoutText(shape: Shape, measure: MeasureText): TextLayout {
       lines,
       widths: lineWidths(lines, FRAME_LABEL_SIZE, measure),
       align: "left",
+      font,
       x: -w / 2,
       y: -h / 2 - FRAME_LABEL_GAP - textHeight(lines.length, FRAME_LABEL_SIZE),
       width: w,
     };
   }
+  const align = shape.align ?? defaultAlign(shape.type);
   if (shape.type === "text") {
-    const lines = wrapText(text, w, TEXT_FONT_SIZE, measure);
+    const fontSize = textShapeSize(shape);
+    const lines = wrapText(text, w, fontSize, measure);
     return {
-      fontSize: TEXT_FONT_SIZE,
+      fontSize,
       lines,
-      widths: lineWidths(lines, TEXT_FONT_SIZE, measure),
-      align: "left",
+      widths: lineWidths(lines, fontSize, measure),
+      align,
+      font,
       x: -w / 2,
       y: -h / 2,
       width: w,
@@ -163,7 +212,8 @@ export function layoutText(shape: Shape, measure: MeasureText): TextLayout {
   const padding = Math.min(w, h) * 0.08;
   const boxW = Math.max(1, w * inset - 2 * padding);
   const boxH = Math.max(1, h * inset - 2 * padding);
-  const largest = Math.min(64, Math.max(12, Math.min(w, h) * 0.12));
+  // A size that's been set is the largest the text gets: it still shrinks to fit.
+  const largest = setSize(shape) ?? Math.min(64, Math.max(12, Math.min(w, h) * 0.12));
 
   const fits = (size: number) =>
     textHeight(wrapText(text, boxW, size, measure).length, size) <= boxH;
@@ -179,24 +229,36 @@ export function layoutText(shape: Shape, measure: MeasureText): TextLayout {
     fontSize = lo;
   }
   const lines = wrapText(text, boxW, fontSize, measure);
+  const height = textHeight(lines.length, fontSize);
   return {
     fontSize,
     lines,
     widths: lineWidths(lines, fontSize, measure),
-    align: "center",
+    align,
+    font,
     x: -boxW / 2,
-    y: -textHeight(lines.length, fontSize) / 2,
+    y:
+      shape.valign === "top"
+        ? -boxH / 2
+        : shape.valign === "bottom"
+          ? boxH / 2 - height
+          : -height / 2,
     width: boxW,
   };
 }
 
-const lineWidths = (lines: readonly string[], fontSize: number, measure: MeasureText) =>
-  lines.map((line) => measure(line.trimEnd()) * fontSize);
+const lineWidths = (
+  lines: readonly string[],
+  fontSize: number,
+  measure: (text: string) => number,
+) => lines.map((line) => measure(line.trimEnd()) * fontSize);
 
-/** The height a text shape needs for its text: one line at least. */
+/** The height a text shape needs for its text, in its font and size: one line at least. */
 export function fittedTextHeight(shape: Shape, measure: MeasureText): number {
-  const lines = wrapText(shape.text, shape.w, TEXT_FONT_SIZE, measure).length;
-  return textHeight(Math.max(1, lines), TEXT_FONT_SIZE);
+  const font = cssFont(shape);
+  const size = textShapeSize(shape);
+  const lines = wrapText(shape.text, shape.w, size, (s) => measure(s, font)).length;
+  return textHeight(Math.max(1, lines), size);
 }
 
 /**
@@ -212,8 +274,11 @@ export function withHeight(shape: Shape, h: number): ShapePatch | null {
   return { x: cx - shape.w / 2, y: cy - h / 2, h };
 }
 
-/** Color of a shape's text: dark or white on solid fills, whichever stands out more. */
+/** Color of a shape's text: as set, or else dark or white on solid fills, whichever stands out more. */
 export function inkColor(shape: Shape, palette: Palette): string {
+  // A color that's been set: on a note's paper, light in both themes, as on a light board.
+  if (shape.textColor && shape.textColor !== "auto")
+    return (shape.type === "sticky" ? palette.ink : palette.solid)[shape.textColor];
   if (shape.type === "sticky") return STICKY_INK;
   if (shape.type === "frame") return palette.frame.label;
   if (shape.type === "text") return palette.solid[shape.color];
@@ -239,42 +304,60 @@ function luminance(hex: string): number {
 export interface FontMetrics {
   readonly measure: MeasureText;
   /**
-   * Distance from the top of a line to its baseline, as a multiple of the
-   * font size: where a browser puts it in a line box `LINE_HEIGHT` tall, so
+   * Distance from the top of a line to its baseline in `font` (a CSS font
+   * at `MEASURE_SIZE`; plain text when absent), as a multiple of the font
+   * size: where a browser puts it in a line box `LINE_HEIGHT` tall, so
    * canvas text sits exactly where the editor's text did.
    */
-  readonly baseline: number;
+  baseline(font?: string): number;
 }
 
-/** Measures with a canvas at a 100px reference size, remembering each string. */
+/** Measures with a canvas at a 100px reference size, remembering each string per font. */
 export function canvasFontMetrics(): FontMetrics {
   const REFERENCE = MEASURE_SIZE;
   const ctx = document.createElement("canvas").getContext("2d");
   const widths = new Map<string, number>();
-  let ascent = 0.9;
-  let descent = 0.22;
-  if (ctx) {
-    ctx.font = `${REFERENCE}px ${FONT_FAMILY}`;
-    const m = ctx.measureText("Hg");
-    // The font's own ascent and descent, which CSS uses for a line's content area.
-    if (m.fontBoundingBoxAscent > 0) {
-      ascent = m.fontBoundingBoxAscent / REFERENCE;
-      descent = m.fontBoundingBoxDescent / REFERENCE;
+  const baselines = new Map<string, number>();
+  let current = "";
+  const use = (font: string) => {
+    if (ctx && current !== font) {
+      ctx.font = font;
+      current = font;
     }
-  }
+  };
   return {
-    measure(text) {
-      let width = widths.get(text);
+    measure(text, font = DEFAULT_FONT) {
+      const key = font === DEFAULT_FONT ? text : `${font}\n${text}`;
+      let width = widths.get(key);
       if (width === undefined) {
+        use(font);
         // Without a 2D context, guess: about half an em per character.
         width = ctx ? ctx.measureText(text).width / REFERENCE : text.length * 0.5;
         if (widths.size >= 20_000) widths.clear();
-        widths.set(text, width);
+        widths.set(key, width);
       }
       return width;
     },
-    // CSS centers the content area (ascent + descent) in the line box.
-    baseline: (LINE_HEIGHT - ascent - descent) / 2 + ascent,
+    baseline(font = DEFAULT_FONT) {
+      let baseline = baselines.get(font);
+      if (baseline === undefined) {
+        let ascent = 0.9;
+        let descent = 0.22;
+        if (ctx) {
+          use(font);
+          const m = ctx.measureText("Hg");
+          // The font's own ascent and descent, which CSS uses for a line's content area.
+          if (m.fontBoundingBoxAscent > 0) {
+            ascent = m.fontBoundingBoxAscent / REFERENCE;
+            descent = m.fontBoundingBoxDescent / REFERENCE;
+          }
+        }
+        // CSS centers the content area (ascent + descent) in the line box.
+        baseline = (LINE_HEIGHT - ascent - descent) / 2 + ascent;
+        baselines.set(font, baseline);
+      }
+      return baseline;
+    },
   };
 }
 
@@ -289,7 +372,7 @@ export class TextLayouts {
   constructor(private readonly measure: MeasureText) {}
 
   get(shape: Shape): TextLayout {
-    const key = `${shape.type}|${shape.w}|${shape.h}|${shape.text}`;
+    const key = `${shape.type}|${shape.w}|${shape.h}|${cssFont(shape)}|${shape.fontSize}|${shape.align}|${shape.valign}|${shape.text}`;
     const cached = this.cache.get(shape.id);
     if (cached?.key === key) return cached.layout;
     const layout = layoutText(shape, this.measure);
