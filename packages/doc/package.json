@@ -6,7 +6,8 @@
   "description": "Board document model: shape types, the DocStore interface, schema and migrations.",
   "exports": {
     ".": "./src/index.ts",
-    "./yjs": "./src/yjs.ts"
+    "./yjs": "./src/yjs.ts",
+    "./comments": "./src/comments.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."

@@ -32,7 +32,7 @@ import { exportPng, exportSvg } from "./export";
 import type { View } from "./follow";
 import { easeCamera, followCamera } from "./follow";
 import { StrokePaths, strokeOutline, traceOutline } from "./freehand";
-import type { Point, Viewport } from "./geometry";
+import type { Box, Point, Viewport } from "./geometry";
 import { drawGrid } from "./grid";
 import { ImageCache, type ImageLoader } from "./images";
 import { InputController } from "./input";
@@ -268,6 +268,10 @@ export interface Engine {
    * zooming only as far as it takes to show all of it and read it.
    */
   reveal(id: ShapeId): void;
+  /** The box around shape `id` on the board (world coordinates), or null when there is no such shape. */
+  boundsOf(id: ShapeId): Box | null;
+  /** The shape at `point` (in the container, in pixels), if any: for pinning a comment on it. */
+  shapeAt(point: Point): ShapeId | null;
   /** Everyone else on the board: their cursors and selections are drawn over the shapes. */
   setPeers(peers: readonly RemotePeer[]): void;
   /**
@@ -320,6 +324,8 @@ const DUPLICATE_OFFSET = 24;
 const NUDGE = { small: 1, large: 10 };
 /** How much of the screen a revealed shape fills at most, across or down. */
 const REVEAL_SHARE = 0.6;
+/** How far from a shape, in screen pixels, still counts as on it for `shapeAt`. */
+const SHAPE_AT_TOLERANCE = 4;
 /** A revealed shape is shown at least this big, so its text can be read, unless it is bigger than the screen allows. */
 const REVEAL_MIN_ZOOM = 0.5;
 /** Widest a pasted text shape starts, in world units; longer lines wrap. */
@@ -1313,6 +1319,15 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     schedule();
   };
 
+  const boundsOf = (id: ShapeId): Box | null => {
+    const shape = scene.get(id);
+    return shape ? shapeBounds(shape) : null;
+  };
+
+  const shapeAt = (point: Point): ShapeId | null =>
+    scene.hit(screenToWorld(state.camera, point), SHAPE_AT_TOLERANCE / state.camera.zoom)?.id ??
+    null;
+
   const bringIntoView = (id: ShapeId) => {
     const shape = scene.get(id);
     if (!shape) return;
@@ -1526,6 +1541,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     setHighlights,
     overview: () => (overviewCache ??= overviewOf(scene, theme.palette)),
     reveal,
+    boundsOf,
+    shapeAt,
     setPeers,
     follow,
     undo,
