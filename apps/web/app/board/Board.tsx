@@ -3,6 +3,7 @@ import type { SyncStatus } from "@niro/sync";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { currentKey } from "./access";
 import { firstImage, ImageError } from "./assets";
+import { CommentControls, Comments, useCommentKey } from "./Comments";
 import { useClipboard } from "./clipboard";
 import { ExportControls } from "./ExportControls";
 import { HistoryPanel } from "./HistoryPanel";
@@ -37,11 +38,19 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
   const [imageNotice, setImageNotice] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const openHelp = useCallback(() => setHelpOpen(true), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
   useHelpKey(openHelp);
   useSearchKey(useCallback(() => setSearchOpen(true), []));
   const theme = useThemeChoice();
+  const togglePlacing = useCallback(() => {
+    if (session && session.board.role === "edit" && !session.engine.getState().readOnly)
+      setPlacing((on) => !on);
+  }, [session]);
+  const stopPlacing = useCallback(() => setPlacing(false), []);
+  useCommentKey(togglePlacing);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -177,6 +186,20 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
             onImage={(file) => void addImage(file)}
             onHelp={openHelp}
             onHistory={() => setHistoryOpen(true)}
+            board={session.board}
+            placing={placing}
+            onPlace={togglePlacing}
+            commentsOpen={commentsOpen}
+            onComments={() => setCommentsOpen((open) => !open)}
+          />
+          <Comments
+            engine={session.engine}
+            board={session.board}
+            boardId={boardId}
+            placing={placing}
+            onPlaced={stopPlacing}
+            listOpen={commentsOpen}
+            onCloseList={() => setCommentsOpen(false)}
           />
           {historyOpen && (
             <HistoryPanel
@@ -217,12 +240,28 @@ function Panels({
   onImage,
   onHelp,
   onHistory,
+  board,
+  placing,
+  onPlace,
+  commentsOpen,
+  onComments,
 }: {
   engine: Engine;
   onImage: (file: File) => void;
   onHelp: () => void;
   onHistory: () => void;
+  board: OpenBoard;
+  placing: boolean;
+  onPlace: () => void;
+  commentsOpen: boolean;
+  onComments: () => void;
 }) {
+  const threads = useSyncExternalStore(
+    board.comments.subscribe,
+    board.comments.threads,
+    () => [] as ReturnType<typeof board.comments.threads>,
+  );
+  const readOnly = useEngineState(engine, (s) => s.readOnly, false);
   const presenting = useEngineState(engine, (s) => s.presenting !== null, false);
   if (presenting) return <PresentControls engine={engine} />;
   return (
@@ -232,6 +271,14 @@ function Panels({
       <ZoomControls engine={engine} onHelp={onHelp} />
       <ExportControls engine={engine} onHistory={onHistory} />
       <Minimap engine={engine} />
+      <CommentControls
+        count={threads.filter((t) => !t.resolved).length}
+        placing={placing}
+        canComment={board.role === "edit" && !readOnly}
+        listOpen={commentsOpen}
+        onPlace={onPlace}
+        onList={onComments}
+      />
     </>
   );
 }

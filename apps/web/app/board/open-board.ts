@@ -1,3 +1,4 @@
+import { type CommentStore, createCommentStore } from "@niro/doc/comments";
 import { createYDocStore, type YDocStore } from "@niro/doc/yjs";
 import {
   AccessDenied,
@@ -27,6 +28,8 @@ export interface OpenBoard {
   readonly store: YDocStore;
   /** The board's images: uploading and loading them. */
   readonly assets: Assets;
+  /** Comments pinned on the board. Writes are ignored while `store` is read-only. */
+  readonly comments: CommentStore;
   /** The board's saved versions. */
   readonly versions: Versions;
   readonly presence: Presence;
@@ -152,8 +155,12 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
   // A refusal can also come after the board opened (a returning visitor
   // whose saved copy let it open before the server answered): then edits
   // would stay in this browser only, so stop them.
-  const followServer = () =>
-    store.setReadOnly(client.readOnly !== null || client.status === "denied");
+  const comments = createCommentStore(doc, { readOnly: role === "view" });
+  const followServer = () => {
+    const refused = client.readOnly !== null || client.status === "denied";
+    store.setReadOnly(refused);
+    comments.setReadOnly(role === "view" || refused);
+  };
   followServer();
   client.subscribe(followServer);
   // The browser knows before the backoff timer that the network is back.
@@ -162,6 +169,7 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
 
   return {
     store,
+    comments,
     assets: createAssets({ boardId, realtimeUrl, token: imageToken }),
     versions: createVersions({ boardId, realtimeUrl, token: imageToken }),
     presence,
@@ -187,6 +195,7 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
       viewKeyListeners.clear();
       window.removeEventListener("online", onOnline);
       store.destroy();
+      comments.destroy();
       presence.destroy();
       client.destroy();
       awareness.destroy();
