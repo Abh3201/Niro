@@ -10,6 +10,7 @@ import {
   type ShapePatch,
   type ShapeType,
   type Tx,
+  takesTextStyle,
 } from "@niro/doc";
 import { asDrawn, canAttachTo, detachUnless } from "./arrows";
 import type { Camera } from "./camera";
@@ -50,7 +51,7 @@ import {
   stepInto,
   withDescendants,
 } from "./structure";
-import { DEFAULT_TEXT_WIDTH, TEXT_FONT_SIZE, textHeight, withHeight } from "./text";
+import { DEFAULT_TEXT_WIDTH, NEW_TEXT_FONT, TEXT_FONT_SIZE, textHeight, withHeight } from "./text";
 import {
   HANDLE_DIRECTIONS,
   type Handle,
@@ -836,6 +837,7 @@ export class Interaction {
       from: null,
       to: null,
       ...(type === "arrow" && this.host.arrowRoute?.() === "elbow" && { route: "elbow" as const }),
+      ...(takesTextStyle(type) && { font: NEW_TEXT_FONT }),
       ...geometry,
     };
     return {

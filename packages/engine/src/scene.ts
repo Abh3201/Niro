@@ -298,6 +298,7 @@ export class Scene {
       before.h === shape.h &&
       before.rotation === shape.rotation &&
       before.text === shape.text &&
+      before.textRuns === shape.textRuns &&
       // A thicker line or a head at the other end covers a different box.
       before.thickness === shape.thickness &&
       before.head === shape.head &&
@@ -305,6 +306,12 @@ export class Scene {
     )
       return;
     this.unindexed.add(shape.id);
+  }
+
+  /** Looks at every shape's drawn box again: text was measured anew (a font loaded). */
+  remeasure(): void {
+    for (const id of this.shapes.keys()) this.unindexed.add(id);
+    this.reindex();
   }
 
   /** Brings the index up to date with how shapes are now drawn. */

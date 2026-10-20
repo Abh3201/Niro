@@ -161,9 +161,9 @@ test("two people typing in one sticky note at once both keep their text", async 
   // kept typing where their own cursor was: two whole runs, in an order
   // the CRDT picks.
   const both = /^(hello from alicehello from bob|hello from bobhello from alice)$/;
-  await expect(aliceEditor).toHaveValue(both);
-  await expect(bobEditor).toHaveValue(both);
-  expect(await aliceEditor.inputValue()).toBe(await bobEditor.inputValue());
+  await expect(aliceEditor).toHaveText(both);
+  await expect(bobEditor).toHaveText(both);
+  expect(await aliceEditor.textContent()).toBe(await bobEditor.textContent());
 
   await alice.context.close();
   await bob.context.close();
@@ -184,7 +184,7 @@ test("text typed with an input method arrives whole, after someone else's typing
   await bob.page.mouse.dblclick(640, 360);
   const aliceEditor = alice.page.getByTestId("text-editor");
   const bobEditor = bob.page.getByTestId("text-editor");
-  await expect(bobEditor).toHaveValue("ab");
+  await expect(bobEditor).toHaveText("ab");
 
   // Alice composes Japanese between "a" and "b", the way an input method
   // does: the text changes in place until it's committed.
@@ -192,7 +192,7 @@ test("text typed with an input method arrives whole, after someone else's typing
   const ime = await alice.page.context().newCDPSession(alice.page);
   await ime.send("Input.imeSetComposition", { text: "に", selectionStart: 1, selectionEnd: 1 });
   await ime.send("Input.imeSetComposition", { text: "にほ", selectionStart: 2, selectionEnd: 2 });
-  await expect(aliceEditor).toHaveValue("aにほb");
+  await expect(aliceEditor).toHaveText("aにほb");
   // Meanwhile Bob types at the start. Nothing reaches Alice's editor until
   // she commits, which would break her composition.
   await bob.page.keyboard.press("Home");
@@ -202,11 +202,11 @@ test("text typed with an input method arrives whole, after someone else's typing
   await alice.page.waitForTimeout(300);
   await ime.send("Input.insertText", { text: "日本" });
 
-  await expect(aliceEditor).toHaveValue("Xa日本b");
-  await expect(bobEditor).toHaveValue("Xa日本b");
+  await expect(aliceEditor).toHaveText("Xa日本b");
+  await expect(bobEditor).toHaveText("Xa日本b");
   // Her cursor is still right after what she wrote.
   await alice.page.keyboard.type("!");
-  await expect(bobEditor).toHaveValue("Xa日本!b");
+  await expect(bobEditor).toHaveText("Xa日本!b");
 
   await alice.context.close();
   await bob.context.close();

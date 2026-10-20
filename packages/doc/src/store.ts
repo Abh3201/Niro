@@ -1,4 +1,5 @@
 import type { ReactionName, Shape, ShapeId, ShapePatch } from "./shape";
+import type { MarkPatch, TextMarks } from "./text-runs";
 
 /** Who made a change: this user (including their undo and redo), or a collaborator. */
 export type Origin = "local" | "remote";
@@ -35,9 +36,23 @@ export interface Tx {
    * Replaces `deleteCount` characters of the shape's text at `index` with
    * `insert`, as an edit to the characters rather than a new value: someone
    * typing elsewhere in the same text keeps their characters. Out-of-range
-   * positions are clamped.
+   * positions are clamped. The inserted characters get exactly `marks`
+   * (none when absent), whatever is around them.
    */
-  editText(id: ShapeId, index: number, deleteCount: number, insert: string): void;
+  editText(
+    id: ShapeId,
+    index: number,
+    deleteCount: number,
+    insert: string,
+    marks?: TextMarks,
+  ): void;
+  /**
+   * Changes the formatting of `length` characters at `index`: each mark in
+   * `patch` is set, or for null, taken away. Two people formatting
+   * different words, or the same word differently, both keep their change
+   * where they don't overlap.
+   */
+  formatText(id: ShapeId, index: number, length: number, patch: MarkPatch): void;
   remove(id: ShapeId): void;
   /** Adds (`on`) or takes back `user`'s reaction to a shape. */
   react(id: ShapeId, reaction: ReactionName, user: string, on: boolean): void;

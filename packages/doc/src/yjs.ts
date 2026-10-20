@@ -7,7 +7,9 @@
  *   per shape means two people changing different fields of the same shape
  *   (one moves it, one recolors it) both keep their change.
  * - A shape's `text` is a Y.Text inside its map, created with the shape, so
- *   two people typing in it merge character by character.
+ *   two people typing in it merge character by character. Formatting on
+ *   parts of it (`Shape.textRuns`) is the Y.Text's own formatting
+ *   attributes, so it merges the same way.
  * - A reaction is a key of its own in the shape's map,
  *   `reaction.<name>.<user>`, set to true: adding and removing your own
  *   reaction never touches anyone else's.
@@ -28,6 +30,7 @@ import {
   USER_ID,
 } from "./shape";
 import type { DocStore, Origin, ShapeChange, TextEdit, Tx } from "./store";
+import type { MarkPatch, TextMarks, TextRun } from "./text-runs";
 
 /** Transaction origin for this user's edits; the undo manager tracks only these. */
 const LOCAL_ORIGIN = Symbol("niro.local");
@@ -97,7 +100,14 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
   const cache = new Map<ShapeId, Shape>();
   const read = (id: string): Shape | null => {
     const value = shapes.get(id);
-    return value instanceof Y.Map ? readShape(id, value.toJSON()) : null;
+    if (!(value instanceof Y.Map)) return null;
+    const raw = value.toJSON();
+    const text = value.get("text");
+    if (text instanceof Y.Text) {
+      const runs = runsOf(text);
+      if (runs) raw.textRuns = runs;
+    }
+    return readShape(id, raw);
   };
   for (const id of shapes.keys()) {
     const shape = read(id);
@@ -153,10 +163,25 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
   };
   doc.on("afterTransactionCleanup", onAfterTransaction);
 
+  /** A shape's Y.Text, made if it's from before text existed (schema 1). */
+  const textOf = (id: ShapeId): Y.Text | null => {
+    const map = shapes.get(id);
+    const shape = cache.get(id);
+    if (!(map instanceof Y.Map) || !shape || !holdsText(shape.type)) return null;
+    let text = map.get("text");
+    if (!(text instanceof Y.Text)) {
+      // Two people starting to type in it at the same moment would race
+      // here; new shapes can't.
+      text = new Y.Text(typeof text === "string" ? text : "");
+      map.set("text", text);
+    }
+    return text as Y.Text;
+  };
+
   const tx: Tx = {
     add(shape) {
       // A copy starts with no reactions.
-      const { id, text, points, from, to, asset, reactions: _, ...fields } = shape;
+      const { id, text, points, from, to, asset, reactions: _, textRuns, ...fields } = shape;
       const map = new Y.Map<unknown>();
       for (const [key, value] of Object.entries(fields)) map.set(key, value);
       if (shape.type === "image" && asset !== undefined && ASSET_ID.test(asset))
@@ -167,8 +192,17 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
       if (to !== null) map.set("to", to);
       // Created now, even empty: a Y.Text two people each created later would
       // be two values for one key, and only one would survive.
-      if (holdsText(shape.type)) map.set("text", new Y.Text(text));
+      const ytext = holdsText(shape.type) ? new Y.Text(text) : null;
+      if (ytext) map.set("text", ytext);
       shapes.set(id, map);
+      // Formatted once in the document: a Y.Text not yet in one can't be.
+      if (ytext && textRuns) {
+        let at = 0;
+        for (const run of textRuns) {
+          if (Object.keys(run.marks).length > 0) ytext.format(at, run.length, { ...run.marks });
+          at += run.length;
+        }
+      }
     },
     update(id, patch) {
       const map = shapes.get(id);
@@ -191,22 +225,22 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
       if (on && map.get(key) !== true) map.set(key, true);
       else if (!on && map.has(key)) map.delete(key);
     },
-    editText(id, index, deleteCount, insert) {
-      const map = shapes.get(id);
-      const shape = cache.get(id);
-      if (!(map instanceof Y.Map) || !shape || !holdsText(shape.type)) return;
-      let text = map.get("text");
-      if (!(text instanceof Y.Text)) {
-        // A shape from before text existed (schema 1). Two people starting to
-        // type in it at the same moment would race here; new shapes can't.
-        text = new Y.Text(typeof text === "string" ? text : "");
-        map.set("text", text);
-      }
-      const ytext = text as Y.Text;
+    editText(id, index, deleteCount, insert, marks) {
+      const ytext = textOf(id);
+      if (!ytext) return;
       const at = Math.max(0, Math.min(Math.trunc(index), ytext.length));
       const remove = Math.max(0, Math.min(Math.trunc(deleteCount), ytext.length - at));
       if (remove > 0) ytext.delete(at, remove);
-      if (insert.length > 0) ytext.insert(at, insert);
+      // Given attributes (even none), Yjs formats the insert with exactly
+      // those, not with whatever surrounds it.
+      if (insert.length > 0) ytext.insert(at, insert, { ...marks });
+    },
+    formatText(id, index, length, patch) {
+      const ytext = textOf(id);
+      if (!ytext) return;
+      const at = Math.max(0, Math.min(Math.trunc(index), ytext.length));
+      const n = Math.max(0, Math.min(Math.trunc(length), ytext.length - at));
+      if (n > 0 && Object.keys(patch).length > 0) ytext.format(at, n, { ...patch });
     },
   };
 
@@ -271,7 +305,10 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
           for (const [id, source] of savedShapes) {
             const target = shapes.get(id);
             if (target instanceof Y.Map) copyFields(source, target);
-            else shapes.set(id, copyFields(source, new Y.Map<unknown>()));
+            else {
+              shapes.set(id, copyFields(source, new Y.Map<unknown>()));
+              flushRuns();
+            }
           }
         }, LOCAL_ORIGIN);
         undoManager.stopCapturing();
@@ -347,18 +384,59 @@ function migrate(doc: Y.Doc, shapes: Y.Map<YShape>, meta: Y.Map<unknown>): void 
  * is edited (so someone typing in it keeps their cursor), the rest is set.
  */
 function copyFields(source: YShape, target: YShape): YShape {
+  pendingRuns.length = 0;
   for (const key of [...target.keys()]) if (!source.has(key)) target.delete(key);
   for (const [key, value] of source) {
     const current = target.get(key);
     if (value instanceof Y.Text) {
       const text = value.toString();
-      if (current instanceof Y.Text) replaceText(current, text);
-      else target.set(key, new Y.Text(text));
+      const runs = runsOf(value);
+      if (current instanceof Y.Text) {
+        replaceText(current, text);
+        // Formatting too: cleared, then set as it was, where it differs.
+        if (JSON.stringify(runsOf(current)) !== JSON.stringify(runs)) applyRuns(current, runs);
+      } else {
+        const fresh = new Y.Text(text);
+        target.set(key, fresh);
+        if (runs && fresh.doc) applyRuns(fresh, runs);
+        else if (runs) pendingRuns.push([fresh, runs]);
+      }
     } else if (JSON.stringify(current) !== JSON.stringify(value)) {
       target.set(key, value);
     }
   }
   return target;
+}
+
+/** Texts `copyFields` made in a map not yet in the document: formatted once it is (`flushRuns`). */
+const pendingRuns: Array<[Y.Text, readonly TextRun[]]> = [];
+
+function flushRuns(): void {
+  for (const [text, runs] of pendingRuns.splice(0)) applyRuns(text, runs);
+}
+
+/** A Y.Text's formatting as runs, or undefined when none of it is formatted. */
+function runsOf(text: Y.Text): TextRun[] | undefined {
+  const delta = text.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
+  if (!delta.some((op) => op.attributes && Object.keys(op.attributes).length > 0)) return undefined;
+  return delta.map((op) => ({
+    length: typeof op.insert === "string" ? op.insert.length : 1,
+    marks: (op.attributes ?? {}) as TextMarks,
+  }));
+}
+
+/** Makes `text`'s formatting `runs` (none when undefined), whatever it was. */
+function applyRuns(text: Y.Text, runs: readonly TextRun[] | undefined): void {
+  const clear: Record<string, null> = {};
+  for (const op of text.toDelta() as Array<{ attributes?: Record<string, unknown> }>)
+    for (const key of Object.keys(op.attributes ?? {})) clear[key] = null;
+  if (Object.keys(clear).length > 0) text.format(0, text.length, clear);
+  let at = 0;
+  for (const run of runs ?? []) {
+    if (Object.keys(run.marks).length > 0)
+      text.format(at, run.length, { ...run.marks } as MarkPatch);
+    at += run.length;
+  }
 }
 
 /** Edits `text` into `to` by replacing only the middle that differs. */

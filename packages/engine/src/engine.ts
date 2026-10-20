@@ -2,6 +2,7 @@ import {
   type ColorName,
   DEFAULT_COLOR,
   type DocStore,
+  formatRuns,
   holdsText,
   isLinear,
   type LineDash,
@@ -44,6 +45,7 @@ import { paintShapes } from "./paint";
 import { type RemotePeer, SmoothedCursors } from "./presence";
 import { presentationOrder, slideView } from "./presentation";
 import { DARK_PALETTE, drawnExtent, LIGHT_PALETTE, type Palette } from "./render";
+import { clearedBy, isEmptyPatch, type TextStyle, type TextStylePatch } from "./rich-text";
 import { Scene } from "./scene";
 import { searchShapes } from "./search";
 import { HANDLE_SIZE, placeHandles } from "./selection";
@@ -65,8 +67,6 @@ import {
   sharedLineStyle,
   sharedTextStyle,
   styleTargets,
-  type TextStyle,
-  type TextStylePatch,
   textStylePatch,
   textStyleTargets,
   ungroup,
@@ -75,7 +75,9 @@ import {
 import {
   canvasFontMetrics,
   DEFAULT_TEXT_WIDTH,
+  FONT_FAMILIES,
   MAX_TEXT_LENGTH,
+  NEW_TEXT_FONT,
   TEXT_FONT_SIZE,
   TextLayouts,
   withHeight,
@@ -397,7 +399,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   const layers = [background, shapes, overlay];
 
   const fonts = canvasFontMetrics();
-  const layouts = new TextLayouts(fonts.measure);
+  const layouts = new TextLayouts(fonts.measure, (font) => fonts.baseline(font));
   const strokes = new StrokePaths();
   /** A shape as drawn: an unnamed frame shows a placeholder name. */
   const labelled = (shape: Shape): Shape =>
@@ -543,12 +545,14 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     options.onLaser?.(p);
   };
 
+  let editingStyle = (): TextStyle | null => null;
   /** What the panel shows about a selection. */
   const describe = (ids: readonly ShapeId[]) => ({
     selectionColor: sharedColor(scene, ids),
     selectionLocked: hasLocked(scene, ids),
     selectionLine: sharedLineStyle(scene, ids),
-    selectionText: sharedTextStyle(scene, ids),
+    // While typing, the formatting where the caret is.
+    selectionText: editingStyle() ?? sharedTextStyle(scene, ids),
     canGroup: outermost(scene, ids).length >= 2,
     canUngroup: ids.some((id) => scene.get(id)?.type === "group"),
     selectionLabel: ids.length === 1 ? describeShape(scene, ids[0] as ShapeId) : "",
@@ -599,10 +603,30 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       if (editing !== state.editing) setState({ ...state, editing });
       markDirty(shapes, overlay);
     },
+    selectionChanged() {
+      const selectionText = editor.textStyle();
+      if (selectionText && JSON.stringify(selectionText) !== JSON.stringify(state.selectionText))
+        setState({ ...state, selectionText });
+    },
     undo: () => undo(),
     redo: () => redo(),
-    toggleTextStyle: (style) => toggleTextStyle(style),
   });
+  editingStyle = () => (editor.editing === null ? null : editor.textStyle());
+
+  // Text was measured in a fallback font until the real one loaded (the
+  // handwriting font is fetched): measure, and so wrap, everything again.
+  const fontsLoaded = () => {
+    fonts.clear();
+    layouts.clear();
+    scene.remeasure();
+    editor.update();
+    markAllDirty();
+  };
+  document.fonts?.addEventListener("loadingdone", fontsLoaded);
+  // Canvas text doesn't make a browser fetch a font the page serves: ask for them.
+  for (const family of Object.values(FONT_FAMILIES))
+    for (const weight of ["normal", "bold"])
+      document.fonts?.load(`${weight} 16px ${family}`).catch(() => {});
 
   const shapeList = new ShapeList(container, scene);
   // A press on the board gives it keyboard focus (not a press in the text
@@ -713,7 +737,6 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         scene,
         palette: theme.palette,
         zoom: camera.zoom,
-        baseline: (font) => fonts.baseline(font),
         // The editor shows the text of the shape being edited.
         textLayout: (shape) => (shape.id === editing ? undefined : textLayout(shape)),
         stroke: (shape) => strokes.get(shape),
@@ -1109,27 +1132,46 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     if (route) arrowRoute = route;
   };
 
+  /**
+   * Formats text: while typing, what's selected in it (see `TextEditor.format`);
+   * otherwise all the text of every selected shape, parts formatted on their
+   * own included.
+   */
   const setTextStyle = (style: TextStylePatch) => {
+    if (editor.editing !== null) {
+      editor.format(style);
+      return;
+    }
     if (hasLocked(scene, state.selection)) return;
     const targets = textStyleTargets(scene, state.selection);
     if (targets.length === 0) return;
+    const cleared = clearedBy(style);
     command((tx) => {
       for (const shape of targets) {
         const patch = textStylePatch(shape, style);
+        // What was set for all the text, no part of it keeps its own.
+        const clear = shape.textRuns !== undefined && !isEmptyPatch(cleared);
+        const runs = clear
+          ? formatRuns(shape.text, shape.textRuns, 0, shape.text.length, cleared)
+          : shape.textRuns;
+        if (clear) tx.formatText(shape.id, 0, shape.text.length, cleared);
         // A text shape grows or shrinks to hold its text in the new size and font.
-        const fitted =
-          shape.type === "text"
-            ? withHeight({ ...shape, ...patch }, layouts.fittedHeight({ ...shape, ...patch }))
-            : null;
+        const { textRuns: _, ...plain } = shape;
+        const next = { ...plain, ...patch, ...(runs && { textRuns: runs }) };
+        const fitted = shape.type === "text" ? withHeight(next, layouts.fittedHeight(next)) : null;
         tx.update(shape.id, { ...patch, ...fitted });
       }
     });
   };
 
   function toggleTextStyle(style: "bold" | "italic" | "underline" | "strike") {
-    const targets = textStyleTargets(scene, state.selection);
-    if (targets.length === 0) return;
-    setTextStyle({ [style]: !targets.every((s) => s[style] === true) });
+    if (editor.editing !== null) {
+      editor.toggle(style);
+      return;
+    }
+    const current = state.selectionText?.[style];
+    if (current === undefined) return;
+    setTextStyle({ [style]: current !== true });
   }
 
   const reorderSelection = (direction: ReorderDirection) => {
@@ -1201,6 +1243,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       parentId: null,
       index: "a0",
       color: DEFAULT_COLOR.text,
+      font: NEW_TEXT_FONT,
       text,
       points: [],
       from: null,
@@ -1635,7 +1678,6 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
         ids: state.selection.length > 0 ? state.selection : null,
         palette: LIGHT_PALETTE,
         background: EXPORT_BACKGROUND,
-        baseline: (font: string) => fonts.baseline(font),
         textLayout,
         stroke: (shape: Shape) => strokes.get(shape),
         image: imageOf,
@@ -1660,6 +1702,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       observer.disconnect();
       pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);
       systemDark.removeEventListener("change", onColorSchemeChange);
+      document.fonts?.removeEventListener("loadingdone", fontsLoaded);
       if (frame !== null) cancelAnimationFrame(frame);
       for (const layer of layers) layer.destroy();
       listeners.clear();
