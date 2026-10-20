@@ -47,8 +47,8 @@ export function holdsText(type: ShapeType): boolean {
 
 /**
  * Groups, frames and sticky notes: the shapes other shapes can belong to,
- * through `parentId`. Only pen strokes belong to a sticky note, and they
- * keep their board position (see docs/decisions/0009-ink-on-notes.md).
+ * through `parentId`. Only pen strokes and images belong to a sticky note,
+ * and they keep their board position (see docs/decisions/0009-ink-on-notes.md).
  */
 export function isContainer(type: ShapeType): boolean {
   return type === "group" || type === "frame" || type === "sticky";

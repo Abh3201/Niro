@@ -215,18 +215,49 @@ export function frameFor(
 }
 
 /**
- * The sticky note a pen stroke put down at `p` belongs to: the topmost
- * shape under `p` (ink aside), if it's a sticky note that isn't locked and
- * isn't in `exclude`. A note covered by something else isn't one: you can't
- * see it there.
+ * The sticky note something put down at `p` belongs to: a pen stroke, an
+ * image pasted or dropped there. It's the topmost shape under `p` (ink
+ * aside), if that's a sticky note, or something already on one, that
+ * isn't locked and isn't in `exclude`. A note covered by anything else
+ * isn't one: you can't see it there.
  */
-export function inkHostAt(
+export function noteAt(
   scene: Scene,
   p: Point,
   exclude: ReadonlySet<ShapeId> = new Set(),
 ): ShapeId | null {
   const top = scene.hit(p, 0, (s) => s.type !== "freehand" && !exclude.has(s.id));
-  return top?.type === "sticky" && !isLocked(scene, top.id) ? top.id : null;
+  if (!top) return null;
+  const parent = scene.parentOf(top.id);
+  const note =
+    top.type === "sticky"
+      ? top.id
+      : parent !== null && scene.get(parent)?.type === "sticky"
+        ? parent
+        : null;
+  return note !== null && !exclude.has(note) && !isLocked(scene, note) ? note : null;
+}
+
+/**
+ * True when `shape` can belong to sticky note `note`: pen strokes always,
+ * images no bigger than the note (a screenshot dropped across a few notes
+ * isn't meant for one of them). Nothing else does.
+ */
+export function joinsNote(shape: Shape, note: Shape): boolean {
+  if (shape.type === "freehand") return true;
+  return shape.type === "image" && shape.w <= note.w && shape.h <= note.h;
+}
+
+/** The note `shape` belongs on where it is now, judged at its center (see `noteAt`, `joinsNote`). */
+export function noteFor(
+  scene: Scene,
+  shape: Shape,
+  exclude: ReadonlySet<ShapeId> = new Set(),
+): ShapeId | null {
+  if (shape.type !== "freehand" && shape.type !== "image") return null;
+  const note = noteAt(scene, shapeCenter(shape), exclude);
+  const host = note === null ? undefined : scene.get(note);
+  return host && joinsNote(shape, host) ? note : null;
 }
 
 /** A key for shape `id` joining `parent`: on top, or for a frame, at the bottom. */
@@ -255,12 +286,9 @@ export function reparentOnMove(
     const parent = scene.parentOf(unit.id);
     if (!scene.has(unit.id) || (parent !== null && scene.get(parent)?.type === "group")) continue;
     const moved = { ...unit, ...translate(unit, dx, dy) };
-    // A stroke follows the note under its center, if any: ink dragged off a
-    // note, or onto one, changes owners.
-    const target =
-      unit.type === "freehand"
-        ? (inkHostAt(scene, shapeCenter(moved), moving) ?? frameFor(scene, moved, moving))
-        : frameFor(scene, moved, moving);
+    // A stroke or an image follows the note under its center, if any:
+    // dragged off a note, or onto one, it changes owners.
+    const target = noteFor(scene, moved, moving) ?? frameFor(scene, moved, moving);
     if (target === parent) continue;
     joining.set(target, [...(joining.get(target) ?? []), unit.id]);
   }
@@ -277,8 +305,8 @@ export function reparentOnMove(
   return patches;
 }
 
-/** Where a new pen stroke goes: on the note it was drawn on, on top, or else where `placeNew` says. */
-export function placeInk(
+/** Where a new stroke or image goes: on note `host`, on top, or else where `placeNew` says. */
+export function placeOnNote(
   scene: Scene,
   stroke: Shape,
   host: ShapeId | null,

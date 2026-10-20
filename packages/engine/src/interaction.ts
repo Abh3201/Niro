@@ -37,12 +37,12 @@ import { type Guide, SNAP_PX, snapBox } from "./snapping";
 import {
   adoptInto,
   hasLocked,
-  inkHostAt,
   isLocked,
   movers,
+  noteAt,
   outermost,
-  placeInk,
   placeNew,
+  placeOnNote,
   releaseOutside,
   reparentOnMove,
   selectableUnit,
@@ -326,7 +326,7 @@ export class Interaction {
     if (tool === "pen") {
       // Each stroke is its own undo step, however quickly the next follows.
       this.host.doc.checkpoint();
-      const host = p.altKey ? null : inkHostAt(this.host.scene, p.world);
+      const host = p.altKey ? null : noteAt(this.host.scene, p.world);
       this.gesture = { kind: "draw", points: [penPoint(p)], host };
       this.host.overlayChanged();
       return true;
@@ -439,7 +439,7 @@ export class Interaction {
     let hovered: ShapeId | null = null;
     let cursor = "";
     if (this.host.tool() === "pen") {
-      const note = p.altKey ? null : inkHostAt(this.host.scene, p.world);
+      const note = p.altKey ? null : noteAt(this.host.scene, p.world);
       if (note !== this.inkHover) {
         this.inkHover = note;
         this.host.overlayChanged();
@@ -841,7 +841,7 @@ export class Interaction {
     return {
       ...shape,
       ...(type === "freehand"
-        ? placeInk(this.host.scene, shape, note)
+        ? placeOnNote(this.host.scene, shape, note)
         : placeNew(this.host.scene, shape)),
     };
   }

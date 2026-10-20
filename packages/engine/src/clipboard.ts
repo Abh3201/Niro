@@ -10,7 +10,7 @@ import {
 import { type Point, unionBoxes } from "./geometry";
 import type { Scene } from "./scene";
 import { shapeBounds } from "./shapes";
-import { frameFor, outermost, siblingsIn, unlocked, withDescendants } from "./structure";
+import { frameFor, noteFor, outermost, siblingsIn, unlocked, withDescendants } from "./structure";
 import { translate } from "./transform";
 
 /**
@@ -96,7 +96,8 @@ export function parseClipping(text: string): Clipping | null {
 /**
  * Adds copies of `shapes` (from `copyShapes`, as drawn) centered on `at`.
  * Each copied shape that isn't inside another goes into the frame it lands
- * in, on top; the rest keep their places inside the copies. Arrows attach
+ * in, on top, or for a stroke or an image, onto the sticky note it lands
+ * on (see `noteFor`); the rest keep their places inside the copies. Arrows attach
  * to copies of the shapes they were attached to, or to nothing. `asset`
  * maps an image's file to the one to use here (an image moved between
  * boards may get a new one). Returns the outermost copies, to select.
@@ -137,7 +138,8 @@ export function pasteShapes(
   const placed = new Map<string, { parentId: ShapeId | null; index: string }>();
   const byParent = new Map<ShapeId | null, Shape[]>();
   for (const unit of units) {
-    const parent = frameFor(scene, { ...unit, ...translate(unit, dx, dy) });
+    const moved = { ...unit, ...translate(unit, dx, dy) };
+    const parent = noteFor(scene, moved) ?? frameFor(scene, moved);
     byParent.set(parent, [...(byParent.get(parent) ?? []), unit]);
   }
   for (const [parent, members] of byParent) {

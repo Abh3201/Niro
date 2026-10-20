@@ -2,17 +2,24 @@
 
 - Status: accepted
 - Date: 2026-10-20
-- Code: [`packages/engine/src/structure.ts`](../../packages/engine/src/structure.ts) (`inkHostAt`, `placeInk`, `movers`, `reparentOnMove`), [`packages/engine/src/interaction.ts`](../../packages/engine/src/interaction.ts), [`packages/doc/src/shape.ts`](../../packages/doc/src/shape.ts)
+- Code: [`packages/engine/src/structure.ts`](../../packages/engine/src/structure.ts) (`noteAt`, `noteFor`, `placeOnNote`, `movers`, `reparentOnMove`), [`packages/engine/src/interaction.ts`](../../packages/engine/src/interaction.ts), [`packages/doc/src/shape.ts`](../../packages/doc/src/shape.ts)
 
 ## Decision
 
 - **Where the stroke starts decides.** The topmost shape under the pen when the stroke begins (other strokes aside) is the owner if it's an unlocked sticky note: the stroke gets that note as its `parentId`, drawn just above the note's other ink. Anywhere else, it behaves as before: on the board, or in the frame it starts in.
 - **Alt held as the stroke starts puts it on the board.** While the pen tool is active, the note the next stroke would belong to is outlined, before and during the stroke, so the choice is visible before ink is down. Only the start matters: releasing Alt mid-stroke changes nothing.
 - **A stroke that runs past the note's edge is kept whole, not clipped.** Clipping would hide ink with no way to get it back; frames clip because they're a deliberate surface, a note is not.
-- **Sticky notes join groups and frames as shapes that can be a `parentId`** (`isContainer`), but only pen strokes are ever put in one. Ink keeps its board position, like a group's members (decision 0006): moving, nudging, rotating or resizing a note writes the note and its ink together (`movers`, `withDescendants`). Resizing a note leaves ink where it is. Inside a frame, ink is stored from the frame's corner as any frame member is.
+- **Sticky notes join groups and frames as shapes that can be a `parentId`** (`isContainer`), but only pen strokes and images (below) are ever put in one. Ink keeps its board position, like a group's members (decision 0006): moving, nudging, rotating or resizing a note writes the note and its ink together (`movers`, `withDescendants`). Resizing a note leaves ink where it is. Inside a frame, ink is stored from the frame's corner as any frame member is.
 - **Dragging a stroke by itself follows its center**: dropped on another note, it joins it; dropped off any note, it goes to the board or the frame under it; nudged within its note, it stays.
 - Copy, duplicate, delete, lock and export treat ink as part of the note through `withDescendants`; Tab reaches ink through its note in reading order.
 - Board format version 7. Strokes drawn before stay on the board; nothing is migrated, because "which note was it meant for" can't be told from the data.
+
+## Images on notes (added 2026-10-20)
+
+- **A pasted image (or one added with the toolbar) goes on a note when one unlocked note is selected; a dropped image, when it's dropped on one.** Where the pointer rests during a paste doesn't count: pasting a screenshot with the pointer over a note isn't a request to shrink it onto the note, and the pen's rule (where the stroke starts) has no paste equivalent besides the selection. It's shrunk to fit (90% of the note at most, across and down), set in the note's middle and turned with it, and belongs to it like ink: it moves, copies, deletes and exports with the note. Anywhere else, images land where they did before.
+- **Dragged by itself, an image follows its center like a stroke, but only joins a note it fits on** (no wider and no taller): a screenshot dropped across a few notes isn't meant for one of them. Copied strokes and images pasted onto a note join it by the same rule.
+- **What's on a note counts as the note** for finding one under a point: a stroke started on an image on a note is the note's ink.
+- No format change: schema 8 clients already treat a note as a parent and move whatever is in it, so boards stay at version 8. An older client dragging such an image by itself takes it off the note.
 
 ## Why
 
