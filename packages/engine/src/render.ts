@@ -12,6 +12,8 @@ export interface Palette {
   paper: Record<ColorName, string>;
   /** Selection, handles and marquee. */
   accent: string;
+  /** Snap guide lines. */
+  guide: string;
   handleFill: string;
   /** Frames: the plain surface (grey frames), the edge, and the name. */
   frame: { fill: string; border: string; label: string };
@@ -43,6 +45,7 @@ export const LIGHT_PALETTE: Palette = {
   solid: SOLID,
   paper: PAPER,
   accent: "#2563eb",
+  guide: "#db2777",
   handleFill: "#ffffff",
   frame: { fill: "#ffffff", border: "#d4d4d8", label: "#6b7280" },
 };
@@ -52,6 +55,7 @@ export const DARK_PALETTE: Palette = {
   solid: { ...SOLID, black: "#e4e4e7" },
   paper: PAPER,
   accent: "#60a5fa",
+  guide: "#f472b6",
   handleFill: "#1e1e24",
   frame: { fill: "#232329", border: "#3f3f46", label: "#a1a1aa" },
 };

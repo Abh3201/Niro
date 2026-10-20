@@ -120,6 +120,7 @@ export class InputController {
       screen,
       world: screenToWorld(this.host.getCamera(), screen),
       shiftKey: event.shiftKey,
+      altKey: event.altKey,
       pressure: pressureOf(event),
     };
   }

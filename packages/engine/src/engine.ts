@@ -676,6 +676,22 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
       ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     }
 
+    // Lines a move is snapped to.
+    const guides = interaction.guides();
+    if (guides.length > 0) {
+      ctx.strokeStyle = theme.palette.guide;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      for (const guide of guides) {
+        const a =
+          guide.axis === "x" ? { x: guide.at, y: guide.from } : { x: guide.from, y: guide.at };
+        const b = guide.axis === "x" ? { x: guide.at, y: guide.to } : { x: guide.to, y: guide.at };
+        outline([a, b], false);
+      }
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1.5;
+    }
+
     // Their cursors go over everything.
     for (const peer of peers) {
       const at = cursors.position(peer.id);
