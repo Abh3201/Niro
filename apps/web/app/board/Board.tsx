@@ -5,6 +5,7 @@ import { currentKey } from "./access";
 import { firstImage, ImageError } from "./assets";
 import { useClipboard } from "./clipboard";
 import { ExportControls } from "./ExportControls";
+import { HistoryPanel } from "./HistoryPanel";
 import { Minimap } from "./Minimap";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
@@ -35,6 +36,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
   const [helpOpen, setHelpOpen] = useState(false);
   const [imageNotice, setImageNotice] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const openHelp = useCallback(() => setHelpOpen(true), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
   useHelpKey(openHelp);
@@ -174,7 +176,18 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
             engine={session.engine}
             onImage={(file) => void addImage(file)}
             onHelp={openHelp}
+            onHistory={() => setHistoryOpen(true)}
           />
+          {historyOpen && (
+            <HistoryPanel
+              board={session.board}
+              onClose={() => {
+                setHistoryOpen(false);
+                containerRef.current?.focus();
+              }}
+              onRestored={notify}
+            />
+          )}
           {searchOpen && (
             <SearchPanel
               engine={session.engine}
@@ -203,10 +216,12 @@ function Panels({
   engine,
   onImage,
   onHelp,
+  onHistory,
 }: {
   engine: Engine;
   onImage: (file: File) => void;
   onHelp: () => void;
+  onHistory: () => void;
 }) {
   const presenting = useEngineState(engine, (s) => s.presenting !== null, false);
   if (presenting) return <PresentControls engine={engine} />;
@@ -215,7 +230,7 @@ function Panels({
       <Toolbar engine={engine} onImage={onImage} />
       <SelectionPanel engine={engine} />
       <ZoomControls engine={engine} onHelp={onHelp} />
-      <ExportControls engine={engine} />
+      <ExportControls engine={engine} onHistory={onHistory} />
       <Minimap engine={engine} />
     </>
   );

@@ -47,6 +47,7 @@ The realtime server listens on http://localhost:8787: WebSockets on `/ws`, `/hea
 - `METRICS_TOKEN`: makes `/metrics` require `Authorization: Bearer <token>`. Set it when port 8787 is reachable from the internet.
 - `NIRO_MAX_SHAPES` (10,000), `NIRO_MAX_BOARD_MB` (5) and `NIRO_MAX_CONNECTIONS_PER_BOARD` (100): limits per board. A board that reaches the first two turns read-only for everyone, and says so.
 - `NIRO_MAX_IMAGE_MB` (5) and `NIRO_MAX_BOARD_IMAGES_MB` (50): the largest image file, and all of a board's images together.
+- `NIRO_MAX_VERSIONS` (30) and `NIRO_MAX_BOARD_VERSIONS_MB` (25): saved versions kept per board, and their total size.
 - `NIRO_MAX_OPEN_MB` (40) and `NIRO_MAX_CONNECTIONS` (2,000): limits for the whole realtime server. An open board takes about 25 times its stored size in memory, so 40 MB of open boards is about 1 GB. See [docs/self-hosting.md](docs/self-hosting.md#limits-to-know-about).
 
 Run one realtime server per database: two would each compact away the other's writes. Outside Docker it needs `DATABASE_URL`, unless `NODE_ENV` isn't `production`, when it keeps boards in memory.

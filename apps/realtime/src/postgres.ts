@@ -1,6 +1,13 @@
 import type { BoardStorage } from "@niro/sync";
 import pg from "pg";
 import type { AssetStorage, ImageType, PutResult, StoredAsset } from "./assets";
+import {
+  type NewVersion,
+  type VersionInfo,
+  type VersionLimits,
+  type VersionStorage,
+  versionsToDrop,
+} from "./versions";
 
 /**
  * The schema, one step per entry, applied in order and recorded in
@@ -34,6 +41,17 @@ const MIGRATIONS: readonly string[] = [
      created_at timestamptz NOT NULL DEFAULT now(),
      PRIMARY KEY (board_id, id)
    );`,
+  // Saved versions of a board. Like images, no reference to boards.
+  `CREATE TABLE board_versions (
+     board_id text NOT NULL,
+     id bigint GENERATED ALWAYS AS IDENTITY,
+     label text,
+     auto boolean NOT NULL,
+     data bytea NOT NULL,
+     bytes integer NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     PRIMARY KEY (board_id, id)
+   );`,
 ];
 
 /** Advisory lock key for migrations: any number, as long as nothing else uses it. */
@@ -50,7 +68,7 @@ export interface PostgresOptions {
  * Boards in Postgres. One realtime server per database: two servers
  * writing the same board would each compact away the other's rows.
  */
-export class PostgresStorage implements BoardStorage, AssetStorage {
+export class PostgresStorage implements BoardStorage, AssetStorage, VersionStorage {
   private constructor(private readonly pool: pg.Pool) {}
 
   /** Connects and brings the schema up to date. */
@@ -153,6 +171,58 @@ export class PostgresStorage implements BoardStorage, AssetStorage {
     return row ? { type: row.type as ImageType, data: row.data } : null;
   }
 
+  async listVersions(boardId: string): Promise<VersionInfo[]> {
+    const { rows } = await this.pool.query<VersionRow>(
+      `SELECT id::text, label, auto, bytes, created_at FROM board_versions
+       WHERE board_id = $1 ORDER BY id DESC`,
+      [boardId],
+    );
+    return rows.map(toInfo);
+  }
+
+  async saveVersion(
+    boardId: string,
+    version: NewVersion,
+    limits: VersionLimits,
+  ): Promise<VersionInfo | null> {
+    if (version.state.byteLength > limits.bytes) return null;
+    let info: VersionInfo | null = null;
+    await this.transaction(async (client) => {
+      // One save per board at a time, so the limits hold.
+      await client.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [
+        MIGRATION_LOCK,
+        boardId,
+      ]);
+      const { rows } = await client.query<VersionRow>(
+        `INSERT INTO board_versions (board_id, label, auto, data, bytes)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id::text, label, auto, bytes, created_at`,
+        [boardId, version.label, version.auto, version.state, version.state.byteLength],
+      );
+      info = toInfo(rows[0] as VersionRow);
+      const all = await client.query<VersionRow>(
+        `SELECT id::text, label, auto, bytes, created_at FROM board_versions
+         WHERE board_id = $1 ORDER BY id`,
+        [boardId],
+      );
+      const drop = versionsToDrop(all.rows.map(toInfo), info.id, limits);
+      if (drop.length > 0)
+        await client.query(
+          "DELETE FROM board_versions WHERE board_id = $1 AND id = ANY($2::bigint[])",
+          [boardId, drop],
+        );
+    });
+    return info;
+  }
+
+  async loadVersion(boardId: string, id: string): Promise<Uint8Array | null> {
+    const { rows } = await this.pool.query<{ data: Buffer }>(
+      "SELECT data FROM board_versions WHERE board_id = $1 AND id = $2::bigint",
+      [boardId, id],
+    );
+    return rows[0]?.data ?? null;
+  }
+
   /** Closes every connection. Call after the last write. */
   close(): Promise<void> {
     return this.pool.end();
@@ -162,6 +232,22 @@ export class PostgresStorage implements BoardStorage, AssetStorage {
     return inTransaction(this.pool, fn);
   }
 }
+
+interface VersionRow {
+  id: string;
+  label: string | null;
+  auto: boolean;
+  bytes: number;
+  created_at: Date;
+}
+
+const toInfo = (row: VersionRow): VersionInfo => ({
+  id: row.id,
+  createdAt: row.created_at.getTime(),
+  label: row.label,
+  auto: row.auto,
+  bytes: row.bytes,
+});
 
 async function inTransaction(
   pool: pg.Pool,

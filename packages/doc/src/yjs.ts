@@ -55,6 +55,14 @@ export interface YDocStore extends DocStore {
    * takes no more changes (it's full). Listeners are called with no changes.
    */
   setReadOnly(readOnly: boolean): void;
+  /**
+   * Puts the board back as it was in `state` (a saved version: the whole
+   * document as one Yjs update) by editing the live board to match: a new
+   * change that collaborators receive and that undo reverts, not a rewind.
+   * Returns false, changing nothing, when the board is read-only or `state`
+   * is from a newer version of Niro.
+   */
+  restore(state: Uint8Array): boolean;
   destroy(): void;
 }
 
@@ -245,6 +253,36 @@ export function createYDocStore(doc: Y.Doc, options: YDocStoreOptions = {}): YDo
     },
     canUndo: () => !isReadOnly() && undoManager.canUndo(),
     canRedo: () => !isReadOnly() && undoManager.canRedo(),
+    restore(state) {
+      if (isReadOnly()) return false;
+      const saved = new Y.Doc();
+      try {
+        Y.applyUpdate(saved, state);
+        const savedShapes = saved.getMap<YShape>("shapes");
+        const savedMeta = saved.getMap<unknown>("meta");
+        const version = savedMeta.get("schemaVersion");
+        if (version !== undefined && !isKnownVersion(version)) return false;
+        migrate(saved, savedShapes, savedMeta);
+        migrate(doc, shapes, meta);
+        undoManager.stopCapturing();
+        doc.transact(() => {
+          if (!meta.has("schemaVersion")) meta.set("schemaVersion", SCHEMA_VERSION);
+          for (const id of [...shapes.keys()]) if (!savedShapes.has(id)) shapes.delete(id);
+          for (const [id, source] of savedShapes) {
+            const target = shapes.get(id);
+            if (target instanceof Y.Map) copyFields(source, target);
+            else shapes.set(id, copyFields(source, new Y.Map<unknown>()));
+          }
+        }, LOCAL_ORIGIN);
+        undoManager.stopCapturing();
+        return true;
+      } catch {
+        // Bytes that aren't a Yjs update.
+        return false;
+      } finally {
+        saved.destroy();
+      }
+    },
     setReadOnly(readOnly) {
       if (readOnly === refused) return;
       refused = readOnly;
@@ -302,6 +340,43 @@ function migrate(doc: Y.Doc, shapes: Y.Map<YShape>, meta: Y.Map<unknown>): void 
     for (; version < SCHEMA_VERSION; version++) MIGRATIONS[version]?.(shapes);
     meta.set("schemaVersion", SCHEMA_VERSION);
   }, MIGRATION_ORIGIN);
+}
+
+/**
+ * Makes `target` hold what `source` holds, touching only what differs: text
+ * is edited (so someone typing in it keeps their cursor), the rest is set.
+ */
+function copyFields(source: YShape, target: YShape): YShape {
+  for (const key of [...target.keys()]) if (!source.has(key)) target.delete(key);
+  for (const [key, value] of source) {
+    const current = target.get(key);
+    if (value instanceof Y.Text) {
+      const text = value.toString();
+      if (current instanceof Y.Text) replaceText(current, text);
+      else target.set(key, new Y.Text(text));
+    } else if (JSON.stringify(current) !== JSON.stringify(value)) {
+      target.set(key, value);
+    }
+  }
+  return target;
+}
+
+/** Edits `text` into `to` by replacing only the middle that differs. */
+function replaceText(text: Y.Text, to: string): void {
+  const from = text.toString();
+  if (from === to) return;
+  let start = 0;
+  while (start < from.length && start < to.length && from[start] === to[start]) start++;
+  let end = 0;
+  while (
+    end < from.length - start &&
+    end < to.length - start &&
+    from[from.length - 1 - end] === to[to.length - 1 - end]
+  )
+    end++;
+  if (from.length - start - end > 0) text.delete(start, from.length - start - end);
+  const insert = to.slice(start, to.length - end);
+  if (insert.length > 0) text.insert(start, insert);
 }
 
 /** A Y.Text change (retain, insert, delete, in order) as edits at positions. */

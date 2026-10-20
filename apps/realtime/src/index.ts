@@ -4,6 +4,7 @@ import { type AssetStorage, MemoryAssets } from "./assets";
 import { limitsFromEnv } from "./config";
 import { PostgresStorage } from "./postgres";
 import { createRealtimeServer } from "./server";
+import { MemoryVersions, type VersionStorage } from "./versions";
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -18,6 +19,7 @@ const server = createRealtimeServer({
   storage,
   // Postgres keeps images in the same database; in memory, they go with the boards.
   assets: storage instanceof PostgresStorage ? storage : (new MemoryAssets() as AssetStorage),
+  versions: storage instanceof PostgresStorage ? storage : (new MemoryVersions() as VersionStorage),
   limits,
   ...(process.env.METRICS_TOKEN ? { metricsToken: process.env.METRICS_TOKEN } : {}),
 });

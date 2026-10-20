@@ -17,10 +17,11 @@ import {
 } from "@niro/sync";
 import { verifyToken } from "@niro/sync/auth";
 import { type WebSocket, WebSocketServer } from "ws";
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import { type AssetStorage, assetId, IMAGE_TYPES, MemoryAssets, sniffImageType } from "./assets";
 import { CONTENT_TYPE, Counter, Histogram, Registry, Sampled } from "./metrics";
 import { TokenBucket } from "./rate";
+import { MemoryVersions, type VersionStorage } from "./versions";
 
 /** Queued bytes above which a connection's cursor updates are skipped. */
 const SOFT_BUFFER_BYTES = 256 * 1024;
@@ -68,6 +69,10 @@ export interface Limits {
   imageBytes: number;
   /** All of one board's image files together. */
   boardImageBytes: number;
+  /** Saved versions kept per board. */
+  versionsPerBoard: number;
+  /** All of one board's saved versions together. */
+  boardVersionBytes: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -82,7 +87,15 @@ export const DEFAULT_LIMITS: Limits = {
   bytesPerSecond: 1024 * 1024,
   imageBytes: 5 * 1024 * 1024,
   boardImageBytes: 50 * 1024 * 1024,
+  versionsPerBoard: 30,
+  boardVersionBytes: 25 * 1024 * 1024,
 };
+
+/** The server saves a version on its own when a board is written and the last one is older than this. */
+const AUTO_VERSION_MS = 30 * 60 * 1000;
+/** A board's saved versions can be added to this often by hand. */
+const SAVE_VERSION_MS = 2_000;
+const MAX_LABEL = 80;
 
 export interface RealtimeServerOptions {
   /** Signs access tokens; shared with the web app (`NIRO_SECRET`). */
@@ -91,6 +104,8 @@ export interface RealtimeServerOptions {
   storage?: BoardStorage;
   /** Where images are kept. Default: in memory, lost on restart. */
   assets?: AssetStorage;
+  /** Where saved versions are kept. Default: in memory, lost on restart. */
+  versions?: VersionStorage;
   limits?: Partial<Limits>;
   /** When set, `/metrics` needs `Authorization: Bearer <token>`. */
   metricsToken?: string;
@@ -209,6 +224,9 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       metrics.flushes.inc({ kind: info.compacted ? "snapshot" : "append" });
       metrics.flushSeconds.observe(info.durationMs / 1000);
       metrics.documentBytes.observe(info.documentBytes);
+      void autoSaveVersion(info.boardId).catch((error: unknown) =>
+        log(`could not save a version of board ${info.boardId}`, error),
+      );
     },
     onError(error, boardId) {
       metrics.storageErrors.inc();
@@ -262,6 +280,44 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     ),
   );
 
+  const versions = options.versions ?? new MemoryVersions();
+  const versionLimits = { count: limits.versionsPerBoard, bytes: limits.boardVersionBytes };
+  /** When each open board was last checked for an automatic version. */
+  const lastAutoCheck = new Map<string, number>();
+  /** When each board last had a version saved by hand. */
+  const lastSaved = new Map<string, number>();
+
+  /** A board that was just written gets a version if its last one is old (or it has none). */
+  async function autoSaveVersion(boardId: string): Promise<void> {
+    const now = Date.now();
+    if (now - (lastAutoCheck.get(boardId) ?? 0) < AUTO_VERSION_MS) return;
+    lastAutoCheck.set(boardId, now);
+    const room = host.rooms.get(boardId);
+    if (!room) return;
+    const newest = (await versions.listVersions(boardId))[0];
+    if (newest && now - newest.createdAt < AUTO_VERSION_MS) return;
+    await versions.saveVersion(
+      boardId,
+      { label: null, auto: true, state: Y.encodeStateAsUpdate(room.doc) },
+      versionLimits,
+    );
+  }
+  const versionRoutes = versionHandler({
+    versions,
+    secret: options.secret,
+    limits: versionLimits,
+    stateOf: (boardId) => {
+      const room = host.rooms.get(boardId);
+      return room ? Y.encodeStateAsUpdate(room.doc) : null;
+    },
+    mayStore: (boardId) => {
+      const now = Date.now();
+      if (now - (lastSaved.get(boardId) ?? 0) < SAVE_VERSION_MS) return false;
+      lastSaved.set(boardId, now);
+      return true;
+    },
+  });
+
   const assets = options.assets ?? new MemoryAssets();
   const assetRoutes = assetHandler(assets, options.secret, limits, (outcome) =>
     metrics.images.inc({ outcome }),
@@ -272,6 +328,14 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     if (path?.startsWith("/assets/")) {
       assetRoutes(req, res, path).catch((error: unknown) => {
         log("image request failed", error);
+        if (!res.headersSent) res.writeHead(500, CORS);
+        res.end();
+      });
+      return;
+    }
+    if (path?.startsWith("/versions/")) {
+      versionRoutes(req, res, path).catch((error: unknown) => {
+        log("version request failed", error);
         if (!res.headersSent) res.writeHead(500, CORS);
         res.end();
       });
@@ -595,6 +659,92 @@ function assetHandler(
     counted(result);
     if (result === "full") return answer(res, 413, { error: "board full" });
     return answer(res, result === "stored" ? 201 : 200, { id: assetKey });
+  };
+}
+
+const VERSION_PATH = /^\/versions\/([A-Za-z0-9_-]+)(?:\/([0-9]{1,18}))?$/;
+
+/**
+ * `GET /versions/<board>` lists the saved versions, newest first;
+ * `GET /versions/<board>/<id>` returns one's state; `POST /versions/<board>`
+ * with `{"label": "..."}` saves the board as it is now. Same 60-second
+ * tokens as images: any token reads, saving needs an edit token.
+ */
+function versionHandler(deps: {
+  versions: VersionStorage;
+  secret: string;
+  limits: { count: number; bytes: number };
+  stateOf(boardId: string): Uint8Array | null;
+  mayStore(boardId: string): boolean;
+}) {
+  const answer = (res: ServerResponse, status: number, body?: unknown) => {
+    res.writeHead(status, {
+      ...CORS,
+      "cache-control": "no-store",
+      ...(body !== undefined && { "content-type": "application/json" }),
+    });
+    res.end(body === undefined ? undefined : JSON.stringify(body));
+  };
+  return async (req: IncomingMessage, res: ServerResponse, path: string) => {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS).end();
+      return;
+    }
+    const match = VERSION_PATH.exec(path);
+    const boardId = match?.[1] ?? "";
+    const id = match?.[2];
+    if (!match || !BOARD_ID.test(boardId)) return answer(res, 404);
+    const header = req.headers.authorization ?? "";
+    const grant = header.startsWith("Bearer ") ? verifyToken(deps.secret, header.slice(7)) : null;
+    if (!grant || grant.boardId !== boardId) return answer(res, 401, { error: "unauthorized" });
+
+    if (req.method === "GET" && !id) {
+      return answer(res, 200, { versions: await deps.versions.listVersions(boardId) });
+    }
+    if (req.method === "GET" && id) {
+      const state = await deps.versions.loadVersion(boardId, id);
+      if (!state) return answer(res, 404);
+      res.writeHead(200, {
+        ...CORS,
+        "content-type": "application/octet-stream",
+        "content-length": state.byteLength,
+        // A version never changes.
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+      });
+      res.end(state);
+      return;
+    }
+    if (req.method !== "POST" || id) return answer(res, 405);
+    if (grant.role !== "edit") return answer(res, 403, { error: "view only" });
+    const body = await readBody(req, 1024);
+    if (!body) return answer(res, 413, { error: "too big" });
+    let label: string | null = null;
+    try {
+      const parsed: unknown = body.byteLength > 0 ? JSON.parse(Buffer.from(body).toString()) : {};
+      const given = (parsed as { label?: unknown } | null)?.label;
+      if (typeof given === "string") {
+        const clean = [...given]
+          .filter((c) => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127)
+          .join("")
+          .trim()
+          .slice(0, MAX_LABEL);
+        label = clean === "" ? null : clean;
+      }
+    } catch {
+      return answer(res, 400, { error: "bad request" });
+    }
+    if (!deps.mayStore(boardId)) return answer(res, 429, { error: "too fast" });
+    const state = deps.stateOf(boardId);
+    // Whoever saves has the board open; if it isn't, there's nothing to save.
+    if (!state) return answer(res, 409, { error: "board not open" });
+    const info = await deps.versions.saveVersion(
+      boardId,
+      { label, auto: false, state },
+      deps.limits,
+    );
+    if (!info) return answer(res, 413, { error: "board too big to keep" });
+    return answer(res, 201, info);
   };
 }
 

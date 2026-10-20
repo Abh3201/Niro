@@ -8,7 +8,7 @@ const FORMATS = [
 ] as const;
 
 /** Downloads the selection, or the whole board, as an image. */
-export function ExportControls({ engine }: { engine: Engine }) {
+export function ExportControls({ engine, onHistory }: { engine: Engine; onHistory: () => void }) {
   const selected = useEngineState(engine, (s) => s.selection.length > 0, false);
   const empty = useEngineState(engine, (s) => s.shapeCount === 0, true);
   const slides = useEngineState(engine, (s) => s.presentable, 0);
@@ -53,6 +53,15 @@ export function ExportControls({ engine }: { engine: Engine }) {
         }}
       >
         Present
+      </button>
+      <button
+        type="button"
+        aria-label="Version history"
+        title="Version history: look at earlier versions and restore one"
+        data-testid="history-open"
+        onClick={onHistory}
+      >
+        History
       </button>
       {FORMATS.map(({ format, label }) => (
         <button

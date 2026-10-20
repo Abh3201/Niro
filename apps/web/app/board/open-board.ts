@@ -14,6 +14,7 @@ import * as Y from "yjs";
 import { readKeys, rememberKey, roleOf } from "./access";
 import { type Assets, createAssets } from "./assets";
 import { loadIdentity, Presence } from "./presence";
+import { createVersions, type Versions } from "./versions";
 
 /** How long to wait for IndexedDB before showing the board without saved content. */
 const LOAD_TIMEOUT_MS = 3000;
@@ -26,6 +27,8 @@ export interface OpenBoard {
   readonly store: YDocStore;
   /** The board's images: uploading and loading them. */
   readonly assets: Assets;
+  /** The board's saved versions. */
+  readonly versions: Versions;
   readonly presence: Presence;
   /** The key the board was opened with. */
   readonly key: string | null;
@@ -115,7 +118,7 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
     return grant;
   };
 
-  // Image requests share one token until it's close to running out.
+  // Image and version requests share one token until it's close to running out.
   let reusable: { token: Promise<string>; until: number } | null = null;
   const imageToken = (): Promise<string> => {
     if (reusable && Date.now() < reusable.until) return reusable.token;
@@ -160,6 +163,7 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
   return {
     store,
     assets: createAssets({ boardId, realtimeUrl, token: imageToken }),
+    versions: createVersions({ boardId, realtimeUrl, token: imageToken }),
     presence,
     key,
     role,

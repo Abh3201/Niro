@@ -65,10 +65,39 @@ describe.skipIf(!databaseUrl)("PostgresStorage", () => {
     expect(await storage.get(BOARD, "b")).toBeNull();
   });
 
+  it("keeps versions per board, newest first, dropping the oldest saved by the server first", async () => {
+    const storage = await open();
+    const limits = { count: 3, bytes: 100 };
+    const state = (byte: number) => new Uint8Array(10).fill(byte);
+    const manual = await storage.saveVersion(
+      BOARD,
+      { label: "mine", auto: false, state: state(1) },
+      limits,
+    );
+    await storage.saveVersion(BOARD, { label: null, auto: true, state: state(2) }, limits);
+    await storage.saveVersion(BOARD, { label: null, auto: true, state: state(3) }, limits);
+    await storage.saveVersion(BOARD, { label: null, auto: true, state: state(4) }, limits);
+    await storage.saveVersion("board-other1", { label: null, auto: true, state: state(5) }, limits);
+    const list = await storage.listVersions(BOARD);
+    expect(list.map((v) => [v.label, v.auto, v.bytes])).toEqual([
+      [null, true, 10],
+      [null, true, 10],
+      ["mine", false, 10],
+    ]);
+    expect(await storage.loadVersion(BOARD, manual?.id ?? "")).toEqual(Buffer.from(state(1)));
+    expect(await storage.loadVersion("board-other1", manual?.id ?? "")).toBeNull();
+    const big = await storage.saveVersion(
+      BOARD,
+      { label: null, auto: false, state: new Uint8Array(101) },
+      limits,
+    );
+    expect(big).toBeNull();
+  });
+
   it("creates the schema once, even when servers start together", async () => {
     await Promise.all([open(), open(), open()]);
     const rows = await query<{ version: number }>(`SELECT version FROM ${schema}.niro_migrations`);
-    expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(rows).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
   });
 
   it("refuses a database a newer Niro has migrated", async () => {
