@@ -435,9 +435,11 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const trails = new LaserTrails();
   const laser = (p: Point | null) => {
+    trails.hold("me", p !== null);
     if (p) {
       trails.add("me", p, performance.now());
       markDirty(overlay);
+      schedule();
     }
     options.onLaser?.(p);
   };
@@ -885,7 +887,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const setPeers = (next: readonly RemotePeer[]) => {
     const now = performance.now();
-    for (const peer of next) if (peer.laser) trails.add(peer.id, peer.laser, now);
+    for (const peer of next) {
+      if (peer.laser) trails.add(peer.id, peer.laser, now);
+      trails.hold(peer.id, !!peer.laser);
+    }
     peers = next;
     cursors.retarget(next);
     markDirty(overlay);

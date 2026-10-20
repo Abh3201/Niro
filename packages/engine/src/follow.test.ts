@@ -49,7 +49,19 @@ describe("LaserTrails", () => {
       ["me", 1],
       [7, 1],
     ]);
-    expect(trails.step(LASER_LIFETIME_MS + 5000)).toBe(false);
+    // The step that clears the last trail still asks for a redraw; the next doesn't.
+    expect(trails.step(LASER_LIFETIME_MS + 5000)).toBe(true);
+    expect(trails.step(LASER_LIFETIME_MS + 5016)).toBe(false);
+  });
+
+  it("keeps the end of a held pointer's trail lit while it rests", () => {
+    const trails = new LaserTrails();
+    trails.add("me", { x: 0, y: 0 }, 0);
+    trails.hold("me", true);
+    expect(trails.step(LASER_LIFETIME_MS * 3)).toBe(true);
+    trails.hold("me", false);
+    trails.step(LASER_LIFETIME_MS * 5);
+    expect(trails.step(LASER_LIFETIME_MS * 5 + 16)).toBe(false);
   });
 
   it("fades from opaque to clear", () => {

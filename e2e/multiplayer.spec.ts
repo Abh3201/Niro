@@ -261,7 +261,7 @@ test("a laser pointer shows to everyone, and viewers can use it", async ({ brows
   // The dot is drawn in her color just up and left of where the pointer is, then fades.
   await expect
     .poll(async () => {
-      const [r, , , a] = await layerPixelAt(editor.page, "overlay", 303, 498);
+      const [r = 0, , , a = 0] = await layerPixelAt(editor.page, "overlay", 303, 498);
       return a > 60 && r > 150;
     })
     .toBe(true);
