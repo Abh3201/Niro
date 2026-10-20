@@ -130,3 +130,16 @@ test("the board is still there after a reload", async ({ page }) => {
   await expectPixel(page, 400, 275, BLUE);
   await expectStatus(page, 1, 0);
 });
+
+test("a dragged shape snaps to another's edge, and Alt turns that off", async ({ page }) => {
+  await drawRectangle(page, { x: 300, y: 200 }, { x: 500, y: 350 });
+  await drawRectangle(page, { x: 600, y: 450 }, { x: 700, y: 550 });
+  // Dropped 3px short of lining up with the first one's left edge: it snaps.
+  await drag(page, { x: 650, y: 500 }, { x: 353, y: 500 });
+  await expectPixel(page, 301, 500, BLUE);
+
+  await page.keyboard.down("Alt");
+  await drag(page, { x: 350, y: 500 }, { x: 353, y: 500 });
+  await page.keyboard.up("Alt");
+  await expectPixel(page, 301, 500, TRANSPARENT);
+});

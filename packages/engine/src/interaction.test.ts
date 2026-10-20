@@ -57,25 +57,30 @@ function setup() {
     fittedHeight: (shape) => Math.max(1, Math.ceil((shape.text.length * 10) / shape.w)) * 30,
   };
   interaction = new Interaction(host);
-  const pointer = (screen: Point, shiftKey = false): ToolPointer => ({
+  const pointer = (screen: Point, shiftKey = false, altKey = false): ToolPointer => ({
     pointerId: 1,
     pointerType: "mouse",
     screen,
     world: screenToWorld(camera, screen),
     shiftKey,
+    altKey,
     pressure: 0.5,
   });
   /** Press, move in steps (flushing a frame after each), release. */
-  const drag = (from: Point, to: Point, shiftKey = false) => {
-    interaction?.pointerDown(pointer(from, shiftKey));
+  const drag = (from: Point, to: Point, shiftKey = false, altKey = false) => {
+    interaction?.pointerDown(pointer(from, shiftKey, altKey));
     for (let i = 1; i <= 4; i++) {
       const t = i / 4;
       interaction?.pointerMove(
-        pointer({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }, shiftKey),
+        pointer(
+          { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t },
+          shiftKey,
+          altKey,
+        ),
       );
       host.flushWrite();
     }
-    interaction?.pointerUp(pointer(to, shiftKey));
+    interaction?.pointerUp(pointer(to, shiftKey, altKey));
   };
   return {
     doc,
@@ -103,6 +108,22 @@ describe("Interaction", () => {
     expect(shapes[0]).toMatchObject({ type: "rectangle", x: 100, y: 100, w: 200, h: 150 });
     expect(t.selection()).toEqual([shapes[0]?.id]);
     expect(t.tool()).toBe("select");
+  });
+
+  it("snaps a dragged shape to the edges of another, unless Alt is held", () => {
+    const t = setup();
+    t.setTool("rectangle");
+    t.drag({ x: 100, y: 100 }, { x: 200, y: 200 });
+    t.setTool("rectangle");
+    t.drag({ x: 400, y: 300 }, { x: 500, y: 400 });
+    const [first, second] = [...t.doc.all()];
+    // Drop the second 3 units right of the first's left edge, far below it.
+    t.drag({ x: 450, y: 350 }, { x: 153, y: 450 });
+    expect(t.doc.get(second?.id as ShapeId)).toMatchObject({ x: 100, y: 400 });
+    // Held Alt: no snapping.
+    t.drag({ x: 150, y: 450 }, { x: 153, y: 450 }, false, true);
+    expect(t.doc.get(second?.id as ShapeId)).toMatchObject({ x: 103 });
+    expect(t.doc.get(first?.id as ShapeId)).toMatchObject({ x: 100, y: 100 });
   });
 
   it("drops a default-size shape on a click", () => {

@@ -13,7 +13,14 @@ import {
 import { asDrawn, canAttachTo, detachUnless } from "./arrows";
 import type { Camera } from "./camera";
 import { type PenPoint, strokeShape } from "./freehand";
-import { type Box, boxContainsBox, boxFromPoints, distance, type Point } from "./geometry";
+import {
+  type Box,
+  boxContainsBox,
+  boxFromPoints,
+  distance,
+  type Point,
+  unionBoxes,
+} from "./geometry";
 import type { Scene } from "./scene";
 import {
   frameCenter,
@@ -25,6 +32,7 @@ import {
   selectionFrame,
 } from "./selection";
 import { shapeBounds } from "./shapes";
+import { type Guide, SNAP_PX, snapBox } from "./snapping";
 import {
   adoptInto,
   movers,
@@ -72,6 +80,8 @@ export interface ToolPointer {
   readonly screen: Point;
   readonly world: Point;
   readonly shiftKey: boolean;
+  /** Alt (Option) is held: a move doesn't snap. */
+  readonly altKey?: boolean;
   /** Pen pressure from 0 to 1; 0.5 for anything that can't sense it. */
   readonly pressure: number;
   /**
@@ -125,6 +135,8 @@ const DEFAULT_SIZE: Record<
 /** Narrowest text shape a drag with the text tool makes, in world units. */
 const MIN_TEXT_WIDTH = 40;
 const DEFAULT_LINE_LENGTH = 160;
+/** How far from the selection, in CSS pixels, shapes are looked at for snapping. */
+const SNAP_REACH_PX = 1200;
 
 type Gesture =
   | { kind: "idle" }
@@ -197,6 +209,8 @@ export class Interaction {
   private releaseStep: (() => void) | null = null;
   private hoveredId: ShapeId | null = null;
   private hoverCursor = "";
+  /** Guide lines for the snap the current move is making. */
+  private snapGuides: readonly Guide[] = [];
 
   constructor(private readonly host: EditorHost) {}
 
@@ -206,6 +220,11 @@ export class Interaction {
     if (g.kind === "marquee") return boxFromPoints([g.start.world, g.current]);
     if (g.kind === "text" && g.dragged) return boxFromPoints([g.start.world, g.current.world]);
     return null;
+  }
+
+  /** The guides to draw while a move is snapped to other shapes, in world coordinates. */
+  guides(): readonly Guide[] {
+    return this.gesture.kind === "move" ? this.snapGuides : [];
   }
 
   hovered(): ShapeId | null {
@@ -322,6 +341,7 @@ export class Interaction {
     // Idle first: finishing can switch tools, and switching tools cancels
     // whatever gesture is still running.
     this.gesture = { kind: "idle" };
+    this.snapGuides = [];
     if (g.kind === "pending") g.onClick?.();
     if (g.kind === "resize") this.finishResize(g);
     if (g.kind === "create") this.finishCreate(g, p);
@@ -340,6 +360,7 @@ export class Interaction {
     const g = this.gesture;
     if (g.kind === "idle") return false;
     this.gesture = { kind: "idle" };
+    this.snapGuides = [];
     if (g.kind === "move" || g.kind === "resize" || g.kind === "rotate") this.restore(g.before);
     if (g.kind === "line-end") this.restore(new Map([[g.before.id, g.before]]));
     if (g.kind === "create" && g.id !== null) {
@@ -504,11 +525,22 @@ export class Interaction {
       case "move": {
         let dx = p.world.x - g.start.world.x;
         let dy = p.world.y - g.start.world.y;
+        const free = { x: true, y: true };
         if (p.shiftKey) {
           // Lock to the axis with the larger movement.
-          if (Math.abs(dx) > Math.abs(dy)) dy = 0;
-          else dx = 0;
+          if (Math.abs(dx) > Math.abs(dy)) {
+            dy = 0;
+            free.y = false;
+          } else {
+            dx = 0;
+            free.x = false;
+          }
         }
+        // Edges and centers line up with other shapes' (Alt turns it off).
+        const snap = p.altKey ? null : this.snap(g, dx, dy, free);
+        this.snapGuides = snap?.guides ?? [];
+        dx += snap?.dx ?? 0;
+        dy += snap?.dy ?? 0;
         // Shapes dragged into or out of a frame join or leave it as they go.
         this.write(
           g.before,
@@ -617,6 +649,35 @@ export class Interaction {
         break;
       }
     }
+  }
+
+  /** How far the move of `g` by `(dx, dy)` should be nudged to line up with other shapes, and the guides for it. */
+  private snap(
+    g: Extract<Gesture, { kind: "move" }>,
+    dx: number,
+    dy: number,
+    free: { x: boolean; y: boolean },
+  ) {
+    const { scene } = this.host;
+    const moving = unionBoxes(
+      g.units.map((unit) => shapeBounds({ ...unit, ...translate(unit, dx, dy) })),
+    );
+    if (!moving) return null;
+    const zoom = this.host.camera().zoom;
+    // Shapes about a screenful away: farther ones are off screen, and a
+    // guide to something you can't see is no help.
+    const reach = SNAP_REACH_PX / zoom;
+    const area = {
+      minX: moving.minX - reach,
+      minY: moving.minY - reach,
+      maxX: moving.maxX + reach,
+      maxY: moving.maxY + reach,
+    };
+    const targets = scene
+      .inBox(area)
+      .filter((s) => s.type !== "group" && !isLinear(s.type) && !g.moving.has(s.id))
+      .map(shapeBounds);
+    return snapBox(moving, targets, SNAP_PX / zoom, free);
   }
 
   /** A resized frame takes in the shapes now inside it and lets go of those outside. */

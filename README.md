@@ -14,7 +14,7 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Frame | Drag with the frame tool around shapes to put them in it; shapes dragged in or out join or leave it. Double-click the name above it to rename it. Drag a frame by its name or edge, or anywhere inside once selected |
 | Group | Ctrl/Cmd + `G` groups the selection, Ctrl/Cmd + Shift + `G` takes a group apart, or the buttons in the panel. A click picks the whole group; double-click to pick a shape inside it |
 | Select | Click, Shift + click to add or remove, drag a marquee on empty space (or inside a frame, to pick what's in it), Ctrl/Cmd + `A` for all |
-| Move, resize, rotate | Drag the shape, a handle, or the round handle above it. Shift locks the axis, the aspect ratio or 15° steps. Arrow keys nudge (Shift: 10px). Esc cancels a drag |
+| Move, resize, rotate | Drag the shape, a handle, or the round handle above it. Shift locks the axis, the aspect ratio or 15° steps. Arrow keys nudge (Shift: 10px). Esc cancels a drag. A shape being moved snaps to other shapes' edges and centers, with a guide line; hold Alt to move freely |
 | Edit | Panel at the top: color, order, duplicate (Ctrl/Cmd + `D`), delete (`Delete`). `]` / `[` bring forward / send backward; with Shift, to the front / back |
 | Copy, paste | Ctrl/Cmd + `C`, `X`, `V`: shapes (with what's in them, arrows kept attached to copies) paste under the pointer, also into another board or tab, images included. Pasted text becomes a text shape |
 | Undo, redo | Ctrl/Cmd + `Z`, Ctrl/Cmd + Shift + `Z` or Ctrl + `Y`, or the buttons under the toolbar |

@@ -15,6 +15,7 @@ The first release: a whiteboard you can run yourself and share by link.
 - Groups, and frames that hold and clip their contents.
 - Images: add one with the toolbar button, by pasting, or by dropping a file on the board. Files are kept by the realtime server, not in the board.
 - Copy, cut and paste shapes, within a board and between boards and tabs; pasted text becomes a text shape.
+- Snapping: a shape you move lines up with the edges and centers of other shapes, with guide lines; Alt turns it off.
 - Emoji reactions on any shape, shown under it for everyone.
 - Pan and zoom with a mouse, a trackpad or touch.
 - Export the selection or the whole board as PNG or SVG.
