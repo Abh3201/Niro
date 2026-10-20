@@ -13,10 +13,7 @@
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
-/*
- * Dark when chosen (data-theme, set by board/theme.ts), or when the system
- * is dark and light wasn't chosen. Keep the two blocks the same.
- */
+/* Light unless dark was chosen (data-theme, set by board/theme.ts). */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --board-bg: #18181b;
@@ -29,22 +26,6 @@
   --accent-fg: #0b1220;
   --accent-soft: #1e2a44;
   --swatch-border: rgb(255 255 255 / 0.2);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --board-bg: #18181b;
-    --grid-dot: #46464f;
-    --panel-bg: #232328;
-    --panel-border: #34343c;
-    --panel-fg: #ececf1;
-    --panel-hover: #2e2e35;
-    --accent: #60a5fa;
-    --accent-fg: #0b1220;
-    --accent-soft: #1e2a44;
-    --swatch-border: rgb(255 255 255 / 0.2);
-  }
 }
 
 html,

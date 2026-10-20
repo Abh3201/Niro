@@ -3,7 +3,7 @@ import { centerOn, createEngine, type Engine } from "@niro/engine";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 import type { OpenBoard } from "./open-board";
-import { engineScheme, getThemeChoice } from "./theme";
+import { getThemeChoice } from "./theme";
 import { VersionError, type VersionInfo } from "./versions";
 
 const when = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -90,7 +90,7 @@ export function HistoryPanel({
         engine = createEngine(container, {
           doc: store,
           loadImage: board.assets.load,
-          colorScheme: engineScheme(getThemeChoice()),
+          colorScheme: getThemeChoice(),
         });
         const { bounds } = engine.overview();
         const width = container.clientWidth || 600;

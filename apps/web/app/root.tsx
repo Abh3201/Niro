@@ -15,8 +15,11 @@ import "@fontsource/kalam/700.css";
 import { THEME_SCRIPT } from "./board/theme";
 
 export const links: Route.LinksFunction = () => [
-  // An empty icon, so browsers don't request /favicon.ico until we have one.
-  { rel: "icon", href: "data:," },
+  // The Niro mark (apps/web/public). favicon.ico for browsers without SVG icons.
+  { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
+  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+  { rel: "manifest", href: "/site.webmanifest" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
