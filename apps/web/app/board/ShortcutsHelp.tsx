@@ -27,6 +27,7 @@ const SECTIONS: ReadonlyArray<{ title: string; rows: ReadonlyArray<[string, stri
       ["Enter", "Edit the selected shape's text"],
       ["Arrow keys", "Nudge (with Shift: 10 px)"],
       ["Delete", "Delete"],
+      [`${MOD} + C / X / V`, "Copy / cut / paste (also to other boards and tabs)"],
       [`${MOD} + D`, "Duplicate"],
       [`${MOD} + G`, "Group"],
       [`${MOD} + Shift + G`, "Ungroup"],

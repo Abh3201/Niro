@@ -3,6 +3,7 @@ import type { SyncStatus } from "@niro/sync";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { currentKey } from "./access";
 import { firstImage, ImageError } from "./assets";
+import { useClipboard } from "./clipboard";
 import { ExportControls } from "./ExportControls";
 import { type OpenBoard, openBoard } from "./open-board";
 import { PresenceBar } from "./PresenceBar";
@@ -95,25 +96,15 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
     [session],
   );
 
-  // Paste an image anywhere on the page, except into a text field.
-  useEffect(() => {
-    if (!session) return;
-    const onPaste = (event: ClipboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        session.engine.getState().editing !== null
-      )
-        return;
-      const file = firstImage(event.clipboardData?.files);
-      if (!file) return;
-      event.preventDefault();
-      void addImage(file);
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, [session, addImage]);
+  // Copy, cut and paste: shapes, images and text (see clipboard.ts).
+  const notify = useCallback((message: string | null) => setImageNotice(message), []);
+  useClipboard({
+    engine: session?.engine ?? null,
+    boardId,
+    assets: session?.board.assets ?? null,
+    addImage: (file) => void addImage(file),
+    notify,
+  });
 
   // Drop an image file on the board, where it lands.
   useEffect(() => {
@@ -142,7 +133,12 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
 
   // A notice about an image goes away by itself.
   useEffect(() => {
-    if (imageNotice === null || imageNotice === "Adding the image…") return;
+    if (
+      imageNotice === null ||
+      imageNotice === "Adding the image…" ||
+      imageNotice === "Adding the images…"
+    )
+      return;
     const timer = setTimeout(() => setImageNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [imageNotice]);

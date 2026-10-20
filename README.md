@@ -16,6 +16,7 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | Select | Click, Shift + click to add or remove, drag a marquee on empty space (or inside a frame, to pick what's in it), Ctrl/Cmd + `A` for all |
 | Move, resize, rotate | Drag the shape, a handle, or the round handle above it. Shift locks the axis, the aspect ratio or 15° steps. Arrow keys nudge (Shift: 10px). Esc cancels a drag |
 | Edit | Panel at the top: color, order, duplicate (Ctrl/Cmd + `D`), delete (`Delete`). `]` / `[` bring forward / send backward; with Shift, to the front / back |
+| Copy, paste | Ctrl/Cmd + `C`, `X`, `V`: shapes (with what's in them, arrows kept attached to copies) paste under the pointer, also into another board or tab, images included. Pasted text becomes a text shape |
 | Undo, redo | Ctrl/Cmd + `Z`, Ctrl/Cmd + Shift + `Z` or Ctrl + `Y`, or the buttons under the toolbar |
 | Pan | Scroll, two-finger trackpad scroll, space + drag, middle-button drag, the hand tool, or one finger on empty space on a touch screen |
 | Zoom | Ctrl/Cmd + scroll, trackpad pinch, two-finger pinch on touch screens, or the buttons bottom-right. Ctrl/Cmd + `=`, `-`, `0` step in, out and back to 100% |
