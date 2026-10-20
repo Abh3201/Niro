@@ -38,6 +38,7 @@ import { InputController } from "./input";
 import { type EditorHost, Interaction, type ToolName } from "./interaction";
 import { LaserTrails, laserAlpha } from "./laser";
 import { Layer } from "./layers";
+import { type Overview, overviewOf } from "./overview";
 import { paintShapes } from "./paint";
 import { type RemotePeer, SmoothedCursors } from "./presence";
 import { DARK_PALETTE, drawnExtent, LIGHT_PALETTE, type Palette } from "./render";
@@ -239,6 +240,8 @@ export interface Engine {
    * an empty list takes the outlines away. Local: never sent to anyone.
    */
   setHighlights(ids: readonly ShapeId[]): void;
+  /** Every shape's box and color, for the minimap; the same object until the board or theme changes. */
+  overview(): Overview;
   /**
    * Selects shape `id` and brings it into view: the camera glides to it,
    * zooming only as far as it takes to show all of it and read it.
@@ -394,6 +397,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   let pendingWrite: (() => void) | null = null;
   const listeners = new Set<() => void>();
   let peers: readonly RemotePeer[] = [];
+  /** The minimap's view of the board; null once something changed. */
+  let overviewCache: Overview | null = null;
   /** Search results outlined on the board. */
   let highlights: readonly ShapeId[] = [];
   const cursors = new SmoothedCursors();
@@ -556,6 +561,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const unsubscribeDoc = doc.subscribe((changes) => {
     scene.apply(changes);
+    overviewCache = null;
     shapeList.changed();
     // Editing just stopped (the board filled up): drop any drawing tool.
     if (doc.readOnly && !VIEW_TOOLS.has(state.tool)) setTool("select");
@@ -1344,7 +1350,10 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
 
   const onColorSchemeChange = () => {
     theme = readTheme(container, isDark());
+    overviewCache = null;
     markAllDirty();
+    // The minimap's colors follow the theme.
+    setState({ ...state });
   };
 
   const observer = new ResizeObserver(resize);
@@ -1402,6 +1411,7 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     editText,
     search: (query) => searchShapes(scene, query),
     setHighlights,
+    overview: () => (overviewCache ??= overviewOf(scene, theme.palette)),
     reveal,
     setPeers,
     follow,

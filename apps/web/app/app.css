@@ -246,6 +246,33 @@ body {
   bottom: 16px;
 }
 
+.minimap,
+.minimap-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 126px;
+}
+
+.minimap {
+  padding: 0;
+  overflow: hidden;
+}
+
+.minimap canvas {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.panel.minimap .minimap-hide {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 24px;
+  height: 24px;
+  opacity: 0.6;
+}
+
 .export-controls {
   position: fixed;
   right: 16px;

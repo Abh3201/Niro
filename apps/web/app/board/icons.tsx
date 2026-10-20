@@ -223,3 +223,10 @@ export const HeadSampleIcon = ({ head }: { head: "none" | "end" | "start" | "bot
     {(head === "start" || head === "both") && <path d="M7.5 6.5L4 10l3.5 3.5" />}
   </Icon>
 );
+
+export const MapIcon = () => (
+  <Icon>
+    <path d="M3 5.5l4-1.5 6 2 4-1.5v10l-4 1.5-6-2-4 1.5z" />
+    <path d="M7 4v10M13 6v10" />
+  </Icon>
+);
