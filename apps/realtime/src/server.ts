@@ -341,7 +341,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       });
       return;
     }
-    if (req.method === "GET" && path === "/healthz") {
+    // HEAD too: uptime monitors (which keep a free-tier app from idling out) often use it.
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
       return;

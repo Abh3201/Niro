@@ -57,6 +57,11 @@ describe("HTTP", () => {
     expect(await res.json()).toEqual({ status: "ok" });
   });
 
+  it("answers HEAD health checks, for uptime monitors", async () => {
+    const res = await fetch(`http://${h.base}/healthz`, { method: "HEAD" });
+    expect(res.status).toBe(200);
+  });
+
   it("returns 404 for unknown paths", async () => {
     const res = await fetch(`http://${h.base}/nope`);
     expect(res.status).toBe(404);
