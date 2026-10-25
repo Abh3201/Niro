@@ -20,7 +20,7 @@ From Microsoft's [App Service limits](https://learn.microsoft.com/azure/azure-re
 
 - **5 WebSockets per instance.** Every browser tab on a board holds one, so at most **5 tabs on boards at once**, across all boards. This is the limit you'll hit first.
 - **60 CPU minutes per app per day.** Past that, the app is stopped and answers `403` until midnight UTC. Niro's realtime server is light, so a few people editing for an hour or two should fit; that's an estimate, not a measurement.
-- **No Always On.** An app nobody has used for about 20 minutes is unloaded, and the next visit waits for it to start (tens of seconds). The realtime server writes every open board when it's stopped, so nothing is lost; browsers reconnect by themselves.
+- **No Always On.** An app nobody has used for 20 minutes is unloaded, and the next visit waits for it to start (tens of seconds). A free uptime monitor can keep it loaded: see [Keep the realtime server awake](#keep-the-realtime-server-awake). The realtime server writes every open board when it's stopped, so nothing is lost; browsers reconnect by themselves.
 - **1 GB of memory and 1 GB of disk**, shared by the plan. Niro's two apps take about 80 MB of disk. Step 4 caps the realtime server's open boards at about 250 MB of memory (`NIRO_MAX_OPEN_MB=10`).
 - **One instance.** That suits Niro, which allows only one realtime server per database anyway.
 - **No custom domain with HTTPS.** Use the `azurewebsites.net` addresses, or put the web app on Vercel with your domain: [deploy-vercel.md](deploy-vercel.md).
@@ -133,13 +133,29 @@ Delete the two `.PublishSettings` files afterwards: each is a password for its a
 
 Both apps must have the same `NIRO_SECRET`, and it must stay the same: it signs every share link, so a new one makes every old link stop working. Save it somewhere safe. The rest of [self-hosting.md's security notes](self-hosting.md#security) apply here too.
 
+## Keep the realtime server awake
+
+Paid plans have **Always On**, which is nothing more than Azure requesting the app every five minutes so it is never idle for the [20 minutes](https://learn.microsoft.com/azure/app-service/configure-common) that unload it. On F1 you can do the same from outside: have a free uptime monitor request `https://<realtime-name>.azurewebsites.net/healthz` every 5 minutes.
+
+1. Sign up at [UptimeRobot](https://uptimerobot.com) (free plan: 50 monitors, every 5 minutes) or [cron-job.org](https://cron-job.org) (free, as often as every minute).
+2. Add an HTTP(S) monitor for the `/healthz` address above, every 5 minutes. `/healthz` answers `GET` and `HEAD` with `200`, and touches neither the database nor any board.
+3. If your web app is on Azure F1 too, add a second monitor for `https://<web-name>.azurewebsites.net/`. A web app on Vercel doesn't need one.
+
+What it costs:
+
+- **CPU quota: almost nothing.** Measured on the realtime server: a `/healthz` request uses about 0.2 ms of CPU, and the server uses no measurable CPU while nobody is connected (0 ticks of 10 ms over 5 minutes). 288 pings a day come to well under a second of the 60 minutes. Real editing is what spends the quota, whether or not the app stays loaded. To check, watch **CPU Time** under the app's **Metrics** in the Azure portal for a day.
+- **Neon: nothing.** `/healthz` never queries Postgres, so the database still suspends after 5 minutes and spends no compute hours. The first board opened after a quiet spell still waits a moment for Neon to wake, which is far shorter than an App Service start.
+- **It doesn't cover restarts.** Azure still restarts free apps now and then (platform updates, a deploy, the daily quota), and the first visit after that waits as before. The monitor makes these rare, not impossible.
+
+Why not a scheduled GitHub Actions workflow: in a private repository every run is billed as at least a whole minute, so pinging every 10 minutes would use about 4,300 of the [2,000 free minutes a month](https://docs.github.com/billing/concepts/product-billing/github-actions) and then block CI and deploys too. Scheduled runs can also start late by many minutes when GitHub is busy, which defeats a 20-minute idle timer, and in a public repository they are [switched off after 60 days](https://docs.github.com/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows) without activity.
+
 ## Troubleshooting
 
 | You see | Likely cause |
 |---|---|
 | The board says it's offline | The browser can't reach the realtime server. Check `PUBLIC_REALTIME_URL` is `wss://<realtime-name>.azurewebsites.net` (no `/ws`), Web sockets is on for the realtime app, and `/healthz` answers. More than 5 tabs open on boards also does this, and so does the realtime server being at `NIRO_MAX_OPEN_MB`. |
 | `403 Site Disabled` | An app used its 60 CPU minutes for the day. It comes back at midnight UTC. |
-| The first visit takes a long time | The apps were unloaded while idle. Expected on the free tier. |
+| The first visit takes a long time | The apps were unloaded while idle. Expected on the free tier, unless something pings them: [Keep the realtime server awake](#keep-the-realtime-server-awake). |
 | Every link stopped working | `NIRO_SECRET` changed on one or both apps. |
 | `MissingSubscriptionRegistration ... Microsoft.Web` | App Service isn't registered on the subscription yet. Run `az provider register --namespace Microsoft.Web --wait`, then try again. |
 | The realtime app won't start | **Log stream** in the Azure portal shows why. `DATABASE_URL is not set` or a Postgres error means the Neon string is missing or wrong. |
