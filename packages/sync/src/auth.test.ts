@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { issueToken, readSecret, roleOfKey, shareKey, TOKEN_TTL_MS, verifyToken } from "./auth";
+import {
+  issueEraseToken,
+  issueToken,
+  readSecret,
+  roleOfKey,
+  shareKey,
+  TOKEN_TTL_MS,
+  verifyEraseToken,
+  verifyToken,
+} from "./auth";
 
 const SECRET = "test-secret-0123456789abcdef0123456789";
 const BOARD = "board-123456";
@@ -54,5 +63,20 @@ describe("readSecret", () => {
     expect(() => readSecret({ NODE_ENV: "production" })).toThrow(/NIRO_SECRET/);
     expect(() => readSecret({ NIRO_SECRET: "short" })).toThrow(/at least 32/);
     expect(readSecret({})).toMatch(/development/);
+  });
+});
+
+describe("erase tokens", () => {
+  it("name their board until they expire", () => {
+    const token = issueEraseToken(SECRET, BOARD, 1000);
+    expect(verifyEraseToken(SECRET, token, 1000)).toBe(BOARD);
+    expect(verifyEraseToken(SECRET, token, 1000 + TOKEN_TTL_MS + 1)).toBeNull();
+    expect(verifyEraseToken("another-secret-0123456789abcdef0123", token, 1000)).toBeNull();
+  });
+
+  it("can't be swapped with access tokens", () => {
+    const access = issueToken(SECRET, BOARD, "edit", 1000);
+    expect(verifyEraseToken(SECRET, access, 1000)).toBeNull();
+    expect(verifyToken(SECRET, issueEraseToken(SECRET, BOARD, 1000), 1000)).toBeNull();
   });
 });

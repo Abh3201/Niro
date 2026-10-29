@@ -51,6 +51,11 @@ export interface AssetStorage {
 export class MemoryAssets implements AssetStorage {
   private readonly boards = new Map<string, Map<string, StoredAsset>>();
 
+  /** Forgets a board's images. */
+  erase(boardId: string): void {
+    this.boards.delete(boardId);
+  }
+
   async put(
     boardId: string,
     id: string,

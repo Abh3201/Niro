@@ -10,10 +10,19 @@ services:
     environment:
       NIRO_SECRET: ${NIRO_SECRET:?Set NIRO_SECRET in .env first. Make one with openssl rand -hex 32}
       PUBLIC_REALTIME_URL: ${PUBLIC_REALTIME_URL:-}
+      # Accounts (docs/accounts.md): on once Google or email sign-in is set up below.
+      DATABASE_URL: postgres://niro:${POSTGRES_PASSWORD:-niro}@postgres:5432/niro
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${WEB_PORT:-3000}}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
       realtime:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   realtime:

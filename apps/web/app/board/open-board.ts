@@ -69,11 +69,18 @@ export interface OpenBoardOptions {
   key: string | null;
   /** The realtime server's base URL, `ws://` or `wss://`. */
   realtimeUrl: string;
+  /**
+   * The signed-in person's name, when there is one. Their account may give
+   * them access without a key, or more than the key gives.
+   */
+  accountName?: string | null;
 }
 
 interface TokenResponse {
   token: string;
   role: Role;
+  /** The key for `role`: the link's, or the one the account gives. */
+  key?: string;
   viewKey?: string;
 }
 
@@ -83,7 +90,8 @@ interface TokenResponse {
  * and sent when the connection comes back.
  */
 export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
-  const { boardId, key, realtimeUrl } = options;
+  const { boardId, realtimeUrl, accountName = null } = options;
+  let key = options.key;
   const doc = new Y.Doc();
   let persistence: IndexeddbPersistence | null = null;
   let saved = false;
@@ -99,20 +107,28 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
 
   const awareness = new Awareness(doc);
   // Before connecting, so the first presence others see has a name.
-  const presence = new Presence(awareness, loadIdentity());
+  const presence = new Presence(awareness, loadIdentity(accountName));
   let viewKey = key && roleOf(key) === "edit" ? (readKeys(boardId).view ?? null) : null;
   const viewKeyListeners = new Set<() => void>();
 
   const requestGrant = async (): Promise<TokenResponse> => {
-    if (!key) throw new AccessDenied();
+    // Without a key, only a signed-in account can give access.
+    if (!key && accountName === null) throw new AccessDenied();
     const response = await fetch("/api/token", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ boardId, key }),
     });
-    if (response.status === 403) throw new AccessDenied();
+    // 410: the board was deleted.
+    if (response.status === 403 || response.status === 410) throw new AccessDenied();
     if (!response.ok) throw new Error(`Token request failed with ${response.status}`);
     const grant = (await response.json()) as TokenResponse;
+    if (grant.key && grant.key !== key && (!key || roleOf(key) === "view")) {
+      // The account gives access the link didn't: use, remember and show that key.
+      key = grant.key;
+      rememberKey(boardId, key);
+      window.history.replaceState(window.history.state, "", `#k=${key}`);
+    }
     if (grant.viewKey && grant.viewKey !== viewKey) {
       viewKey = grant.viewKey;
       rememberKey(boardId, viewKey);
@@ -133,8 +149,19 @@ export async function openBoard(options: OpenBoardOptions): Promise<OpenBoard> {
     return token;
   };
 
+  // Signed in, ask first: the account may give access (or more of it) that
+  // the link doesn't, and the board should open in that mode. The answer's
+  // token opens the first connection.
+  let first: Promise<TokenResponse> | null = null;
+  if (accountName !== null) {
+    first = requestGrant();
+    await first.catch(() => {});
+  }
+
   const connect = async (): Promise<Socket> => {
-    const grant = await requestGrant();
+    const pending = first;
+    first = null;
+    const grant = await (pending ?? requestGrant());
     const query = new URLSearchParams({
       v: String(PROTOCOL_VERSION),
       board: boardId,

@@ -76,16 +76,25 @@ const pick = <T>(items: readonly T[]): T => items[Math.floor(Math.random() * ite
 
 const cleanName = (name: string) => name.trim().slice(0, MAX_NAME_LENGTH);
 
-/** Your name and color, made up the first time and remembered after that. */
-export function loadIdentity(): Identity {
+/** Set once you type a name yourself: then it wins over your account's name. */
+const NAMED_STORAGE = "niro:named";
+
+/**
+ * Your name and color, made up the first time and remembered after that.
+ * Signed in, the name is your account's, unless you've typed one yourself.
+ */
+export function loadIdentity(accountName: string | null = null): Identity {
+  let identity: Identity | null = null;
+  let named = false;
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(STORAGE) ?? "null");
-    const identity = readIdentity(stored);
-    if (identity) return identity;
+    identity = readIdentity(JSON.parse(localStorage.getItem(STORAGE) ?? "null"));
+    named = localStorage.getItem(NAMED_STORAGE) === "1";
   } catch {
     // Unreadable or no storage: make one up.
   }
-  const identity = { name: `${pick(ADJECTIVES)} ${pick(ANIMALS)}`, color: pick(PEER_COLORS) };
+  identity ??= { name: `${pick(ADJECTIVES)} ${pick(ANIMALS)}`, color: pick(PEER_COLORS) };
+  const fromAccount = accountName ? cleanName(accountName) : "";
+  if (fromAccount && !named) identity = { ...identity, name: fromAccount };
   saveIdentity(identity);
   return identity;
 }
@@ -262,6 +271,11 @@ export class Presence {
     const user = readIdentity({ ...this.identity(), name });
     if (!user) return;
     saveIdentity(user);
+    try {
+      localStorage.setItem(NAMED_STORAGE, "1");
+    } catch {
+      // Not remembered.
+    }
     this.awareness.setLocalStateField("user", user);
   }
 

@@ -98,6 +98,19 @@ az webapp deploy --resource-group $RG --name $WEB --src-path out/azure/web.zip -
 
 Open `https://$WEB.azurewebsites.net`. You get a new board; its address is the edit link.
 
+### Optional: sign-in and My boards
+
+To let people sign in with Google or an emailed link and keep a list of their boards, give the web app the database and a way to sign in. Make the Google client and the Resend key first, as [accounts.md](accounts.md) explains; leave out whichever you don't use.
+
+```sh
+az webapp config appsettings set --resource-group $RG --name $WEB --settings \
+  DATABASE_URL="$DATABASE_URL" PUBLIC_URL=https://$WEB.azurewebsites.net \
+  GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+  RESEND_API_KEY=... EMAIL_FROM="Niro <signin@your-domain>"
+```
+
+Use Neon's pooled connection string here. If the web app is on Vercel instead, set the same variables there, with `PUBLIC_URL` your domain.
+
 ## Updating
 
 Pull the new version, run `./deploy/azure/package.sh` again, and repeat the two `az webapp deploy` lines, realtime first. Or let GitHub do it: see the next section. Read [CHANGELOG.md](../CHANGELOG.md) first.

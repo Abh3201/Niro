@@ -82,6 +82,8 @@ interface Entry {
   /** `bytes` above which the document is measured again. */
   measureAbove: number;
   closing: boolean;
+  /** Erased: nothing more is written, whatever arrives. */
+  discarded: boolean;
 }
 
 const defaultSchedule = (delayMs: number, fn: () => void) => {
@@ -206,6 +208,21 @@ export class RoomHost {
     );
   }
 
+  /**
+   * Closes the board's room without writing what's unwritten, for a board
+   * being erased. Resolves once any write already under way has finished,
+   * so erasing the storage afterwards leaves nothing behind. Whoever still
+   * holds a lease keeps a dead room; close their connections first.
+   */
+  async discard(boardId: string): Promise<void> {
+    const entry = this.entries.get(boardId);
+    if (!entry) return;
+    entry.discarded = true;
+    entry.pending = [];
+    this.drop(entry);
+    await entry.writes;
+  }
+
   private open(boardId: string): Entry {
     // `ready` is set just below; `load` doesn't read it.
     const entry = {
@@ -220,6 +237,7 @@ export class RoomHost {
       bytes: 0,
       measureAbove: this.maxDocumentBytes,
       closing: false,
+      discarded: false,
     } as Omit<Entry, "ready"> as Entry;
     entry.ready = this.load(entry);
     this.entries.set(boardId, entry);
@@ -248,6 +266,7 @@ export class RoomHost {
   }
 
   private changed(entry: Entry, update: Uint8Array): void {
+    if (entry.discarded) return;
     entry.pending.push(update);
     entry.bytes += update.length;
     this.checkLimits(entry);
@@ -398,6 +417,11 @@ export class MemoryStorage implements BoardStorage {
 
   async replace(boardId: string, state: Uint8Array): Promise<void> {
     this.boards.set(boardId, [state]);
+  }
+
+  /** Forgets a board. */
+  erase(boardId: string): void {
+    this.boards.delete(boardId);
   }
 
   /** Rows stored for a board, for tests. */

@@ -1,6 +1,7 @@
 import { createEngine, type Engine } from "@niro/engine";
 import type { SyncStatus } from "@niro/sync";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { BoardAccount } from "~/accounts/types";
 import { currentKey } from "./access";
 import { firstImage, ImageError } from "./assets";
 import { BoardMenu } from "./BoardMenu";
@@ -30,7 +31,17 @@ interface Session {
  * around it; the engine creates and draws its own canvases outside React's
  * render cycle, and the document never enters React state.
  */
-export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: string }) {
+export function Board({
+  boardId,
+  realtimeUrl,
+  account,
+}: {
+  boardId: string;
+  realtimeUrl: string;
+  /** The board's account side, or null when the server has no accounts. */
+  account: BoardAccount | null;
+}) {
+  const accountName = account?.viewer?.name ?? null;
   const containerRef = useRef<HTMLDivElement>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [failed, setFailed] = useState(false);
@@ -58,7 +69,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
     let cancelled = false;
     let cleanup: (() => void) | null = null;
 
-    openBoard({ boardId, key: currentKey(boardId), realtimeUrl })
+    openBoard({ boardId, key: currentKey(boardId), realtimeUrl, accountName })
       .then((board) => {
         if (cancelled) {
           board.destroy();
@@ -92,7 +103,7 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
       cleanup?.();
       setSession(null);
     };
-  }, [boardId, realtimeUrl]);
+  }, [boardId, realtimeUrl, accountName]);
 
   const addImage = useCallback(
     async (file: File, at?: { x: number; y: number }) => {
@@ -220,7 +231,12 @@ export function Board({ boardId, realtimeUrl }: { boardId: string; realtimeUrl: 
               }}
             />
           )}
-          <PresenceBar boardId={boardId} board={session.board} engine={session.engine} />
+          <PresenceBar
+            boardId={boardId}
+            board={session.board}
+            engine={session.engine}
+            account={account}
+          />
           <BoardStatus engine={session.engine} board={session.board} />
         </>
       )}

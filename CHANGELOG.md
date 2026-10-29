@@ -38,7 +38,8 @@ The first release: a whiteboard you can run yourself and share by link.
 
 ### Working together
 
-- Every board has an edit link and a view-only link. There are no accounts: a link is the access.
+- Every board has an edit link and a view-only link: a link is the access.
+- Optional accounts: sign in with Google or an emailed link (no passwords), and **My boards** lists the boards you made or opened, on any device, to open, rename and delete. Deleting a board stops its links working and erases it from the server. Off until set up: [docs/accounts.md](docs/accounts.md), [decision 0015](docs/decisions/0015-accounts.md).
 - Edits, cursors and selections appear live for everyone on the board. Typing in the same text at once works.
 - Boards are saved in Postgres and in each browser, so they open offline and survive restarts.
 
@@ -53,4 +54,5 @@ The first release: a whiteboard you can run yourself and share by link.
 
 - One realtime server per database; it doesn't scale out yet.
 - A single link can't be revoked; changing `NIRO_SECRET` revokes them all.
-- No comments, images, templates or accounts yet.
+- No templates yet.
+- Accounts can't remove one person's access to a board yet.

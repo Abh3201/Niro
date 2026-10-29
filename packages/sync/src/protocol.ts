@@ -45,6 +45,8 @@ export const CloseCode = {
   TooSlow: 4008,
   /** The client sent too many messages or bytes too fast. */
   RateLimited: 4029,
+  /** The board was deleted. Reconnecting finds the link no longer works. */
+  Erased: 4410,
 } as const;
 
 /** Sync step 1: "here is what I have", as a state vector. */

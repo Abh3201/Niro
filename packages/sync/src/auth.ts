@@ -1,7 +1,8 @@
 /**
  * Share links and access tokens. Server-side only (it needs the secret).
  *
- * There are no accounts. Whoever has a board's link has access. The link
+ * Whoever has a board's link has access (accounts, when the web app has
+ * them, add a list of boards on top; see docs/decisions/0015-accounts.md). The link
  * carries a key: an HMAC of the board id and a role under the server's
  * secret. So the server can check a key without storing anything, and
  * nobody can make a key without the secret.
@@ -87,4 +88,33 @@ export function verifyToken(secret: string, token: string, now = Date.now()): Gr
   if (typeof b !== "string" || (r !== "edit" && r !== "view") || typeof e !== "number") return null;
   if (now > e) return null;
   return { boardId: b, role: r, expires: e };
+}
+
+/**
+ * A short-lived token that lets the realtime server erase one board: the web
+ * app issues it to the board's owner after marking the board deleted. Signed
+ * under its own label, so an access token can never pass for one.
+ */
+export function issueEraseToken(secret: string, boardId: string, now = Date.now()): string {
+  const payload = Buffer.from(JSON.stringify({ b: boardId, e: now + TOKEN_TTL_MS })).toString(
+    "base64url",
+  );
+  return `${payload}.${mac(secret, `niro:erase:${payload}`)}`;
+}
+
+/** The board an erase token is for, or null if it's forged, malformed or expired. */
+export function verifyEraseToken(secret: string, token: string, now = Date.now()): string | null {
+  const [payload, signature, extra] = token.split(".");
+  if (!payload || !signature || extra !== undefined) return null;
+  if (!same(signature, mac(secret, `niro:erase:${payload}`))) return null;
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof claims !== "object" || claims === null) return null;
+  const { b, e } = claims as Record<string, unknown>;
+  if (typeof b !== "string" || typeof e !== "number" || now > e) return null;
+  return b;
 }

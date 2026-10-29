@@ -26,7 +26,8 @@ An open source, self-hostable whiteboard in the spirit of Miro, and a project fo
 | React | Select shapes and pick an emoji in the panel at the top: 👍 ❤️ 😂 🎉 😮 👀. Everyone sees the counts under the shape; pick it again to take yours back |
 | Follow, point | Click someone's avatar (top right) to see what they see; panning or zooming yourself stops it. `K` picks the laser pointer: hold and drag, and everyone sees a trail that fades (view-only visitors can use it too) |
 | Lock, line style | Lock selected shapes (panel at the top, or Shift + Alt + `L`) so they can't be moved, edited or deleted by accident; click one to unlock it. Lines and arrows can be solid, dashed or dotted, thin to thick, with a head at either or both ends |
-| Share | **Share**, top right: an edit link and a view-only link, and your name as others see it. Whoever has a link has that access; there are no accounts |
+| Share | **Share**, top right: an edit link and a view-only link, and your name as others see it. Whoever has a link has that access |
+| Sign in | Optional, when the server has it set up: **Sign in** with Google or an emailed link, and **My boards** lists every board you made or opened, on any device, to open, rename or delete. See [docs/accounts.md](docs/accounts.md) |
 
 ## Run it with Docker
 
@@ -51,6 +52,8 @@ The realtime server listens on http://localhost:8787: WebSockets on `/ws`, `/hea
 - `NIRO_MAX_OPEN_MB` (40) and `NIRO_MAX_CONNECTIONS` (2,000): limits for the whole realtime server. An open board takes about 25 times its stored size in memory, so 40 MB of open boards is about 1 GB. See [docs/self-hosting.md](docs/self-hosting.md#limits-to-know-about).
 
 Run one realtime server per database: two would each compact away the other's writes. Outside Docker it needs `DATABASE_URL`, unless `NODE_ENV` isn't `production`, when it keeps boards in memory.
+
+Accounts (sign in with Google or by email, and My boards) are off until you set them up: [docs/accounts.md](docs/accounts.md).
 
 How share links work, and what they can't do (revoke one link): [docs/decisions/0002-sharing.md](docs/decisions/0002-sharing.md). How boards are stored, and the limits: [docs/decisions/0003-storage.md](docs/decisions/0003-storage.md).
 

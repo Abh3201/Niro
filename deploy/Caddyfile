@@ -5,8 +5,15 @@
 	handle /ws {
 		reverse_proxy realtime:8787
 	}
-	# ...and so do images on boards...
+	# ...and so do images on boards, saved versions, and erasing a
+	# deleted board...
 	handle /assets/* {
+		reverse_proxy realtime:8787
+	}
+	handle /versions/* {
+		reverse_proxy realtime:8787
+	}
+	handle /erase/* {
 		reverse_proxy realtime:8787
 	}
 	# ...and everything else to the web app. /healthz and /metrics stay
