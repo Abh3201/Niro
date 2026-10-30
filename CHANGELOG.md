@@ -40,6 +40,7 @@ The first release: a whiteboard you can run yourself and share by link.
 
 - Every board has an edit link and a view-only link: a link is the access.
 - Optional accounts: sign in with Google or an emailed link (no passwords), and **My boards** lists the boards you made or opened, on any device, to open, rename and delete. Deleting a board stops its links working and erases it from the server. Off until set up: [docs/accounts.md](docs/accounts.md), [decision 0015](docs/decisions/0015-accounts.md).
+- Privacy policy (`/privacy`), terms of service (`/terms`) and an about page (`/about`), linked from sign-in and My boards, as Google's OAuth consent screen asks. They name the site's operator and contact from `NIRO_OPERATOR` and `NIRO_CONTACT_EMAIL`. Google sign-in tokens are now stored encrypted.
 - Edits, cursors and selections appear live for everyone on the board. Typing in the same text at once works.
 - Boards are saved in Postgres and in each browser, so they open offline and survive restarts.
 

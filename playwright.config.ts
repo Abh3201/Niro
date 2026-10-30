@@ -57,6 +57,8 @@ export default defineConfig({
         PORT: String(port),
         NIRO_SECRET: secret,
         PUBLIC_REALTIME_URL: `ws://127.0.0.1:${realtimePort}`,
+        NIRO_OPERATOR: "Test Operator",
+        NIRO_CONTACT_EMAIL: "privacy@example.com",
       },
       reuseExistingServer: !process.env.CI,
     },
@@ -72,6 +74,9 @@ export default defineConfig({
               DATABASE_URL: databaseUrl,
               PUBLIC_URL: `http://127.0.0.1:${accountsPort}`,
               NIRO_EMAIL_OUTBOX: OUTBOX,
+              // Shows the Google button and policy; no test signs in with Google.
+              GOOGLE_CLIENT_ID: "e2e.apps.googleusercontent.com",
+              GOOGLE_CLIENT_SECRET: "e2e",
             },
             reuseExistingServer: !process.env.CI,
           },

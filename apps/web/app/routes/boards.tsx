@@ -20,6 +20,7 @@ import {
 import { accountsEnabled } from "~/accounts/db.server";
 import { MAX_TITLE } from "~/accounts/limits";
 import { readKeys } from "~/board/access";
+import { SiteFooter } from "~/legal/SiteFooter";
 import { getSecret, realtimeUrl } from "~/sharing.server";
 import type { Route } from "./+types/boards";
 
@@ -171,6 +172,7 @@ export default function Boards({ loaderData }: Route.ComponentProps) {
           <BoardGrid boards={shared} testId="shared-boards-list" />
         </section>
       )}
+      <SiteFooter />
     </main>
   );
 }
