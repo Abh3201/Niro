@@ -17,6 +17,8 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      NIRO_OPERATOR: ${NIRO_OPERATOR:-}
+      NIRO_CONTACT_EMAIL: ${NIRO_CONTACT_EMAIL:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:

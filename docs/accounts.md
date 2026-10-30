@@ -19,6 +19,8 @@ The realtime server needs nothing new.
 | `RESEND_API_KEY` | from Resend (below) |
 | `EMAIL_FROM` | `Niro <signin@your-domain>`, on a domain verified in Resend |
 | `NIRO_DB_POOL` | optional: database connections per web app instance, default 5 |
+| `NIRO_OPERATOR` | who runs the site, shown in the privacy policy and terms, like `Ada Lovelace` |
+| `NIRO_CONTACT_EMAIL` | where people send privacy and account-deletion requests |
 
 In Docker compose, put these in `.env` ([`.env.example`](../.env.example) lists them); `DATABASE_URL` is set for you, and `compose.https.yml` sets `PUBLIC_URL` from `NIRO_DOMAIN`. On Vercel and Azure, add them where `NIRO_SECRET` is: Vercel's **Environment Variables** ([deploy-vercel.md](deploy-vercel.md)), or the web app's **Environment variables** in Azure ([deploy-azure.md](deploy-azure.md)). Redeploy (or restart) after adding them.
 
@@ -33,12 +35,17 @@ About ten minutes, free.
    - **App information**: app name `Niro`, your email as support email.
    - **Audience**: **External**.
    - **Contact information**: your email. Accept the policy, **Create**.
-3. **Audience**, **Publish app**. Niro asks only for name, email and picture (`openid`, `email`, `profile`), which Google doesn't review. Until it's published, only the test users you add there can sign in.
-4. **Clients**, **Create client**:
+3. **Branding**: Google wants these pages on your own domain, which Niro serves for you (set `NIRO_OPERATOR` and `NIRO_CONTACT_EMAIL` first, so the policy names you and says how to reach you):
+   - **Application home page**: `https://<your domain>/about` (`/` starts a new board, so it can't be the home page).
+   - **Application privacy policy link**: `https://<your domain>/privacy`
+   - **Application terms of service link**: `https://<your domain>/terms`
+   - **Authorized domains**: your domain's top private domain: for `board.example.com`, `example.com`. Prove you own it in [Google Search Console](https://search.google.com/search-console) with the same Google account. A `*.vercel.app` or `*.azurewebsites.net` address can't be verified this way.
+4. **Audience**, **Publish app**. Niro asks only for name, email and picture (`openid`, `email`, `profile`), which aren't sensitive scopes, so Google doesn't review the app. Until it's published, only the test users you add there can sign in. To show Niro's name and logo on Google's sign-in screen, also submit for brand verification (**Branding**, **Verify branding**; usually minutes, sometimes 2 to 3 business days).
+5. **Clients**, **Create client**:
    - **Application type**: Web application. **Name**: Niro.
    - **Authorized redirect URIs**: `https://<your domain>/api/auth/callback/google`. Add `http://localhost:5173/api/auth/callback/google` too to try it with `pnpm dev`. It must match exactly: `http` or `https`, port, no trailing `/`.
    - **Create**. Copy the **Client ID** and **Client secret** now: Google shows the secret only once.
-5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the web app.
+6. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the web app.
 
 If you move to another domain, add its redirect URI to the client first.
 
@@ -58,6 +65,10 @@ In development (`pnpm dev`, so `NODE_ENV` isn't `production`) with no Resend key
 docker run -d -p 5433:5432 -e POSTGRES_USER=niro -e POSTGRES_PASSWORD=niro postgres:18-alpine
 DATABASE_URL=postgres://niro:niro@localhost:5433/niro pnpm dev
 ```
+
+## Privacy policy and terms
+
+`/privacy` and `/terms` describe what Niro stores and the rules for using it; `/about` describes Niro, and the sign-in page and My boards link all three. They name the site's operator and contact from `NIRO_OPERATOR` and `NIRO_CONTACT_EMAIL`, and only mention Google or email sign-in when it's set up. The list of hosting providers (Vercel, Azure, Neon, Resend) is the project's own deployment: if you host Niro elsewhere, edit "Who handles it" in [`apps/web/app/routes/privacy.tsx`](../apps/web/app/routes/privacy.tsx). Change a page's `UPDATED` date whenever you change it.
 
 ## What people see
 

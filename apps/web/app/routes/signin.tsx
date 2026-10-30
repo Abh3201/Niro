@@ -2,6 +2,7 @@ import { useState } from "react";
 import { redirect } from "react-router";
 import { getUser, signInMethods } from "~/accounts/auth.server";
 import { accountsEnabled } from "~/accounts/db.server";
+import { SiteFooter } from "~/legal/SiteFooter";
 import type { Route } from "./+types/signin";
 
 /** Where to go after signing in: a path on this site, never another site. */
@@ -158,7 +159,12 @@ export default function SignIn({ loaderData }: Route.ComponentProps) {
         <p className="hint small">
           <a href="/">Or start a board without an account</a>
         </p>
+        <p className="hint small" data-testid="signin-legal">
+          By signing in you agree to the <a href="/terms">terms</a>, and your information is handled
+          as the <a href="/privacy">privacy policy</a> says.
+        </p>
       </div>
+      <SiteFooter />
     </main>
   );
 }

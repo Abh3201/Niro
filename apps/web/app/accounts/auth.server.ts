@@ -81,6 +81,9 @@ function options(): BetterAuthOptions {
       // Google checks that people own their address, so signing in with it
       // and with an emailed link reaches the same account.
       accountLinking: { enabled: true, trustedProviders: ["google"] },
+      // Niro never calls Google with them, but Better Auth keeps the tokens
+      // Google returns: encrypted, they're no use to someone reading the database.
+      encryptOAuthTokens: true,
     },
     session: {
       expiresIn: 60 * 60 * 24 * 30,

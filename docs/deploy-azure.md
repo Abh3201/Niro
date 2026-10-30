@@ -106,7 +106,8 @@ To let people sign in with Google or an emailed link and keep a list of their bo
 az webapp config appsettings set --resource-group $RG --name $WEB --settings \
   DATABASE_URL="$DATABASE_URL" PUBLIC_URL=https://$WEB.azurewebsites.net \
   GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
-  RESEND_API_KEY=... EMAIL_FROM="Niro <signin@your-domain>"
+  RESEND_API_KEY=... EMAIL_FROM="Niro <signin@your-domain>" \
+  NIRO_OPERATOR="Your name" NIRO_CONTACT_EMAIL=you@example.com
 ```
 
 Use Neon's pooled connection string here. If the web app is on Vercel instead, set the same variables there, with `PUBLIC_URL` your domain.
