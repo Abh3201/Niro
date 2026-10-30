@@ -65,6 +65,26 @@ describe.skipIf(!databaseUrl)("PostgresStorage", () => {
     expect(await storage.get(BOARD, "b")).toBeNull();
   });
 
+  it("erases a board's updates, images and versions, and only that board's", async () => {
+    const storage = await open();
+    const update = Y.encodeStateAsUpdate(new Y.Doc());
+    const image = { type: "image/png" as const, data: new Uint8Array(8).fill(1) };
+    const version = { label: null, auto: false, state: new Uint8Array([1]) };
+    const limits = { count: 3, bytes: 100 };
+    for (const board of [BOARD, "board-other1"]) {
+      await storage.append(board, update);
+      await storage.put(board, "a", image, 1000);
+      await storage.saveVersion(board, version, limits);
+    }
+    await storage.eraseBoard(BOARD);
+    expect(await storage.load(BOARD)).toEqual([]);
+    expect(await storage.get(BOARD, "a")).toBeNull();
+    expect(await storage.listVersions(BOARD)).toEqual([]);
+    expect(await storage.load("board-other1")).toHaveLength(1);
+    expect(await storage.get("board-other1", "a")).not.toBeNull();
+    expect(await storage.listVersions("board-other1")).toHaveLength(1);
+  });
+
   it("keeps versions per board, newest first, dropping the oldest saved by the server first", async () => {
     const storage = await open();
     const limits = { count: 3, bytes: 100 };

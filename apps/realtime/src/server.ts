@@ -15,7 +15,7 @@ import {
   type Room,
   RoomHost,
 } from "@niro/sync";
-import { verifyToken } from "@niro/sync/auth";
+import { TOKEN_TTL_MS, verifyEraseToken, verifyToken } from "@niro/sync/auth";
 import { type WebSocket, WebSocketServer } from "ws";
 import * as Y from "yjs";
 import { type AssetStorage, assetId, IMAGE_TYPES, MemoryAssets, sniffImageType } from "./assets";
@@ -111,6 +111,12 @@ export interface RealtimeServerOptions {
   metricsToken?: string;
   /** Pings every connection this often and drops those that missed the last ping. */
   pingIntervalMs?: number;
+  /**
+   * Deletes everything stored for a board: its updates, images and
+   * versions. Called for `DELETE /erase/<id>`, which the web app's erase
+   * token authorizes. Without it, that route answers 404.
+   */
+  erase?: (boardId: string) => Promise<void>;
   /** Failures that belong to no one connection: storage, mostly. Default: console.error. */
   log?: (message: string, error: unknown) => void;
 }
@@ -138,6 +144,20 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   const connections = new Map<string, number>();
   /** Every board's count in `connections`, added up. */
   let connectionCount = 0;
+  /** Each board's open sockets, to close when the board is erased. */
+  const sockets = new Map<string, Set<WebSocket>>();
+  /**
+   * Boards erased lately, and when. Tokens issued just before the erase
+   * still work for a minute: until they expire, they open nothing.
+   */
+  const erased = new Map<string, number>();
+  const wasErased = (boardId: string) => {
+    const at = erased.get(boardId);
+    if (at === undefined) return false;
+    if (Date.now() - at <= TOKEN_TTL_MS) return true;
+    erased.delete(boardId);
+    return false;
+  };
   let closing = false;
 
   const registry = new Registry();
@@ -295,6 +315,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     const room = host.rooms.get(boardId);
     if (!room) return;
     const newest = (await versions.listVersions(boardId))[0];
+    if (wasErased(boardId)) return;
     if (newest && now - newest.createdAt < AUTO_VERSION_MS) return;
     await versions.saveVersion(
       boardId,
@@ -319,15 +340,53 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
   });
 
   const assets = options.assets ?? new MemoryAssets();
-  const assetRoutes = assetHandler(assets, options.secret, limits, (outcome) =>
-    metrics.images.inc({ outcome }),
+  const assetRoutes = assetHandler(
+    assets,
+    options.secret,
+    limits,
+    (outcome) => metrics.images.inc({ outcome }),
+    wasErased,
   );
+
+  /**
+   * `DELETE /erase/<id>`, with an erase token from the web app: closes
+   * everyone's connection to the board and deletes all of it.
+   */
+  async function eraseRoute(req: IncomingMessage, res: ServerResponse, path: string) {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS).end();
+      return;
+    }
+    const boardId = ERASE_PATH.exec(path)?.[1] ?? "";
+    if (!options.erase || !BOARD_ID.test(boardId)) return res.writeHead(404, CORS).end();
+    if (req.method !== "DELETE") return res.writeHead(405, CORS).end();
+    const header = req.headers.authorization ?? "";
+    const granted = header.startsWith("Bearer ")
+      ? verifyEraseToken(options.secret, header.slice(7))
+      : null;
+    if (granted !== boardId) return res.writeHead(401, CORS).end();
+    erased.set(boardId, Date.now());
+    for (const ws of sockets.get(boardId) ?? []) ws.close(CloseCode.Erased, "board deleted");
+    await host.discard(boardId);
+    await options.erase(boardId);
+    lastAutoCheck.delete(boardId);
+    lastSaved.delete(boardId);
+    res.writeHead(204, CORS).end();
+  }
 
   const http = createServer((req, res) => {
     const path = pathname(req);
     if (path?.startsWith("/assets/")) {
       assetRoutes(req, res, path).catch((error: unknown) => {
         log("image request failed", error);
+        if (!res.headersSent) res.writeHead(500, CORS);
+        res.end();
+      });
+      return;
+    }
+    if (path?.startsWith("/erase/")) {
+      eraseRoute(req, res, path).catch((error: unknown) => {
+        log("erase request failed", error);
         if (!res.headersSent) res.writeHead(500, CORS);
         res.end();
       });
@@ -387,7 +446,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
     const boardId = url.searchParams.get("board") ?? "";
     if (!BOARD_ID.test(boardId)) return refuse("400 Bad Request", "bad_request");
     const grant = verifyToken(options.secret, url.searchParams.get("token") ?? "");
-    if (!grant || grant.boardId !== boardId) return refuse("401 Unauthorized", "unauthorized");
+    if (!grant || grant.boardId !== boardId || wasErased(boardId))
+      return refuse("401 Unauthorized", "unauthorized");
     if (closing) return refuse("503 Service Unavailable", "shutting_down");
     const count = connections.get(boardId) ?? 0;
     if (count >= limits.connectionsPerRoom) return refuse("503 Service Unavailable", "room_full");
@@ -427,7 +487,7 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
           wss.handleUpgrade(req, socket, head, (ws) => {
             upgraded = true;
             socket.off("close", abandoned);
-            connect(ws, lease, grant.role, unreserve);
+            connect(ws, boardId, lease, grant.role, unreserve);
           });
         },
         (error: unknown) => {
@@ -440,8 +500,17 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       .catch((error: unknown) => log("upgrade failed", error));
   });
 
-  function connect(ws: WebSocket, lease: Lease, role: Role, unreserve: () => void): void {
+  function connect(
+    ws: WebSocket,
+    boardId: string,
+    lease: Lease,
+    role: Role,
+    unreserve: () => void,
+  ): void {
     const room = lease.room;
+    const boardSockets = sockets.get(boardId) ?? new Set<WebSocket>();
+    boardSockets.add(ws);
+    sockets.set(boardId, boardSockets);
     const messages = new TokenBucket(limits.messagesPerSecond, limits.messagesPerSecond * 2);
     const bytes = new TokenBucket(limits.bytesPerSecond, limits.bytesPerSecond * 4);
     let caughtUp = false;
@@ -498,6 +567,8 @@ export function createRealtimeServer(options: RealtimeServerOptions): RealtimeSe
       room.receive(peer, data);
     });
     ws.on("close", () => {
+      boardSockets.delete(ws);
+      if (boardSockets.size === 0 && sockets.get(boardId) === boardSockets) sockets.delete(boardId);
       room.leave(peer);
       lease.release();
       unreserve();
@@ -578,9 +649,11 @@ function acquireWithin(host: RoomHost, boardId: string, ms: number): Promise<Lea
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "authorization, content-type",
-  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
   "access-control-max-age": "86400",
 } as const;
+
+const ERASE_PATH = /^\/erase\/([A-Za-z0-9_-]+)$/;
 
 const ASSET_PATH = /^\/assets\/([A-Za-z0-9_-]+)(?:\/([0-9a-f]{64}))?$/;
 
@@ -595,6 +668,7 @@ function assetHandler(
   secret: string,
   limits: Limits,
   counted: (outcome: "stored" | "exists" | "full" | "refused") => void,
+  wasErased: (boardId: string) => boolean,
 ) {
   const answer = (res: ServerResponse, status: number, body?: unknown) => {
     res.writeHead(status, {
@@ -634,6 +708,7 @@ function assetHandler(
     }
     if (req.method !== "POST" || id) return answer(res, 405);
     if (grant.role !== "edit") return answer(res, 403, { error: "view only" });
+    if (wasErased(boardId)) return answer(res, 410, { error: "board deleted" });
     const declared = (req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "";
     if (!Object.hasOwn(IMAGE_TYPES, declared)) {
       counted("refused");

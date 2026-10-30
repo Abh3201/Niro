@@ -959,3 +959,430 @@ body {
   font-size: 12px;
   opacity: 0.75;
 }
+
+/* Accounts: the board's name, the account button and its menu (board page and My boards). */
+.board-title {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.panel button.board-title {
+  display: block;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.board-title-input {
+  width: 200px;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--board-bg);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+
+.sign-in-link {
+  padding: 6px 10px;
+  border-radius: 7px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sign-in-link:hover {
+  background: var(--panel-hover);
+}
+
+.account {
+  position: relative;
+}
+
+.account-button,
+.panel button.account-button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 50%;
+  background: #4f46e5;
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel button.account-button:hover:not(:disabled) {
+  background: #4f46e5;
+  filter: brightness(1.1);
+}
+
+.account-button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 220px;
+  padding: 6px;
+  font-size: 13px;
+}
+
+.account-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--panel-border);
+  overflow-wrap: anywhere;
+}
+
+.account-who span {
+  opacity: 0.7;
+}
+
+.account-menu .menu-item {
+  display: block;
+  height: auto;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.account-menu .menu-item:hover {
+  background: var(--panel-hover);
+}
+
+/* Pages that aren't a board: sign-in and My boards. They scroll, unlike the board. */
+.primary-button,
+.google-button,
+.card-action,
+.secondary-button,
+.text-button,
+.submit,
+.text-field {
+  font: inherit;
+}
+
+.page {
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--board-bg);
+  color: var(--panel-fg);
+}
+
+.brand {
+  color: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.primary-button,
+.page .primary-button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.form-error {
+  margin: 8px 0;
+  color: #dc2626;
+}
+
+:root[data-theme="dark"] .form-error {
+  color: #f87171;
+}
+
+.signin-page {
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.signin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.08);
+}
+
+.signin-card h1,
+.signin-card h2 {
+  margin: 0;
+}
+
+.signin-card h2 {
+  font-size: 18px;
+}
+
+.signin-card .small {
+  font-size: 13px;
+  text-align: center;
+}
+
+.signin-card a {
+  color: var(--accent);
+}
+
+.google-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.google-button:hover:not(:disabled) {
+  background: var(--panel-hover);
+}
+
+.divider {
+  margin: 0;
+  text-align: center;
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+.email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.email-form label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.email-form .text-field {
+  padding: 9px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--board-bg);
+  color: inherit;
+}
+
+.email-form .submit {
+  margin-top: 4px;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.boards-page {
+  padding: 0 16px 48px;
+}
+
+.boards-page > * {
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.boards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.boards-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.boards-actions form {
+  margin: 0;
+}
+
+.boards-page h2 {
+  margin: 24px 0 12px;
+  font-size: 16px;
+}
+
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
+
+.board-card-open {
+  display: grid;
+  place-items: center;
+  height: 110px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 40px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.board-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 12px;
+}
+
+.board-card-title {
+  overflow: hidden;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-card-title:hover {
+  text-decoration: underline;
+}
+
+.board-card-meta {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.board-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.card-action {
+  padding: 4px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.card-action:hover {
+  background: var(--panel-hover);
+}
+
+.card-action.danger {
+  color: #dc2626;
+}
+
+.board-card-rename {
+  display: flex;
+  gap: 4px;
+}
+
+.board-card-rename .text-field {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--board-bg);
+  color: inherit;
+}
+
+.import-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  font-size: 14px;
+}
+
+.import-offer .secondary-button {
+  padding: 8px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}

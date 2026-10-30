@@ -10,6 +10,7 @@ services:
     ports: !reset []
     environment:
       PUBLIC_REALTIME_URL: wss://${NIRO_DOMAIN:?Set NIRO_DOMAIN in .env first}
+      PUBLIC_URL: https://${NIRO_DOMAIN:?Set NIRO_DOMAIN in .env first}
   realtime:
     ports: !reset []
 

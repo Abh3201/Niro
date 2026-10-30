@@ -1,6 +1,9 @@
 import type { Engine } from "@niro/engine";
 import type { SyncStatus } from "@niro/sync";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { AccountMenu } from "~/accounts/AccountMenu";
+import { BoardTitle, claimBoard } from "~/accounts/BoardTitle";
+import type { BoardAccount } from "~/accounts/types";
 import { shareLink } from "./access";
 import type { OpenBoard } from "./open-board";
 import { MAX_NAME_LENGTH, type Person } from "./presence";
@@ -17,16 +20,20 @@ const STATUS_LABEL: Record<SyncStatus, string> = {
 const MAX_AVATARS = 5;
 const NOBODY: readonly Person[] = [];
 
-/** Top right: connection status, who's here, and sharing. */
+/** Top right: the board's name, connection status, who's here, sharing and your account. */
 export function PresenceBar({
   boardId,
   board,
   engine,
+  account,
 }: {
   boardId: string;
   board: OpenBoard;
   engine: Engine;
+  account: BoardAccount | null;
 }) {
+  const [owned, setOwned] = useState(account?.owned ?? false);
+  const [claimed, setClaimed] = useState<"no" | "yes" | "failed">("no");
   const following = useEngineState(engine, (s) => s.following, null);
   const status = useSyncExternalStore<SyncStatus>(
     board.status.subscribe,
@@ -48,6 +55,7 @@ export function PresenceBar({
   return (
     <div className="presence">
       <div className="panel presence-bar">
+        {account && <BoardTitle boardId={boardId} title={account.title} owned={owned} />}
         <span className="status" data-status={status} data-testid="sync-status" role="status">
           {STATUS_LABEL[status]}
         </span>
@@ -110,7 +118,38 @@ export function PresenceBar({
         >
           Share
         </button>
+        {account && (
+          <AccountMenu viewer={account.viewer}>
+            {account.ownerless && !owned && board.role === "edit" && (
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                data-testid="claim-board"
+                onClick={async () => {
+                  const ok = await claimBoard(boardId);
+                  setClaimed(ok ? "yes" : "failed");
+                  if (ok) setOwned(true);
+                }}
+              >
+                Save to my boards
+              </button>
+            )}
+          </AccountMenu>
+        )}
       </div>
+      {claimed !== "no" && (
+        <div className="panel following" role="status" data-testid="claim-result">
+          <span>
+            {claimed === "yes"
+              ? "This board is yours now: it's in My boards, and you can rename it."
+              : "Couldn't save it: someone may own it already."}
+          </span>
+          <button type="button" onClick={() => setClaimed("no")}>
+            OK
+          </button>
+        </div>
+      )}
       {following !== null && (
         <div className="panel following" role="status" data-testid="following">
           <span>Following {people.find((p) => p.id === following)?.name ?? "someone"}</span>

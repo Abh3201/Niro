@@ -137,7 +137,7 @@ With `compose.https.yml`, `/metrics` isn't reachable from outside. To scrape it,
 - **Board size.** 10,000 shapes or 5 MB per board by default, as above. 10,000 sticky notes take about 3 MB, so only boards full of long text or pen strokes get near 5 MB.
 - **Memory.** An open board takes about 25 times its stored size in the realtime server's memory (measured with sticky notes: 1,000 of them are 0.28 MB stored and 8 MB in memory; 10,000 are 3 MB and 67 MB). `NIRO_MAX_OPEN_MB` caps the open boards together; the default, 40, is about 1 GB. Set it to what your machine can spare divided by 25: on a 2 GB machine that also runs Postgres and the web app, about 30. A board stays open while anyone has it open, and is written and closed when the last person leaves.
 - **Turned away.** A browser refused by a limit on people or memory shows the board as offline and keeps retrying, so it gets in once there's room. `niro_connections_rejected_total` in `/metrics` counts refusals by reason (`room_full`, `server_full`), and `niro_open_board_bytes` shows how full the budget is.
-- **No accounts.** Anyone with a link has its access; see below.
+- **Accounts are optional.** Without them, anyone with a link has its access; see below. To let people sign in and keep a list of their boards, see [accounts.md](accounts.md).
 
 ## Security
 
@@ -147,6 +147,7 @@ With `compose.https.yml`, `/metrics` isn't reachable from outside. To scrape it,
 - **Links stay out of server logs.** The key is in the URL fragment, which browsers never send. The WebSocket carries a token that expires after 60 seconds, so a proxy log that records it holds nothing useful.
 - **Use HTTPS on anything but your own network.** Over plain HTTP, anyone on the path can read the links and the boards.
 - **Change `POSTGRES_PASSWORD`**, and don't publish the Postgres port; the compose file doesn't.
+- **With accounts**, the database also holds people's emails and sessions: back it up and guard it as personal data. Signing in doesn't change who can open a board: links still do, and an account remembers the boards its links opened ([decision 0015](decisions/0015-accounts.md)).
 
 ## Troubleshooting
 

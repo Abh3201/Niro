@@ -14,12 +14,20 @@ const production = process.env.NODE_ENV === "production";
 const secret = readSecret(process.env);
 const limits = limitsFromEnv(process.env);
 const storage = await openStorage();
+// Postgres keeps images and versions in the same database; in memory, they go with the boards.
+const assets = storage instanceof PostgresStorage ? storage : new MemoryAssets();
+const versions = storage instanceof PostgresStorage ? storage : new MemoryVersions();
 const server = createRealtimeServer({
   secret,
   storage,
-  // Postgres keeps images in the same database; in memory, they go with the boards.
-  assets: storage instanceof PostgresStorage ? storage : (new MemoryAssets() as AssetStorage),
-  versions: storage instanceof PostgresStorage ? storage : (new MemoryVersions() as VersionStorage),
+  assets: assets as AssetStorage,
+  versions: versions as VersionStorage,
+  async erase(boardId) {
+    if (storage instanceof PostgresStorage) return storage.eraseBoard(boardId);
+    (storage as MemoryStorage).erase(boardId);
+    (assets as MemoryAssets).erase(boardId);
+    (versions as MemoryVersions).erase(boardId);
+  },
   limits,
   ...(process.env.METRICS_TOKEN ? { metricsToken: process.env.METRICS_TOKEN } : {}),
 });

@@ -83,6 +83,11 @@ export class MemoryVersions implements VersionStorage {
 
   constructor(private readonly now: () => number = Date.now) {}
 
+  /** Forgets a board's versions. */
+  erase(boardId: string): void {
+    this.boards.delete(boardId);
+  }
+
   async listVersions(boardId: string): Promise<VersionInfo[]> {
     return (this.boards.get(boardId) ?? []).map((v) => v.info).reverse();
   }

@@ -1,6 +1,6 @@
 # 0002: Share links are capability keys; the WebSocket takes a 60-second token
 
-- Status: accepted
+- Status: accepted; accounts added on top by [0015](0015-accounts.md), which keeps links as the access
 - Date: 2026-10-17
 - Code: [`packages/sync/src/auth.ts`](../../packages/sync/src/auth.ts), [`apps/web/app/routes/api.token.ts`](../../apps/web/app/routes/api.token.ts), the upgrade check in [`apps/realtime/src/server.ts`](../../apps/realtime/src/server.ts)
 

@@ -228,6 +228,16 @@ export class PostgresStorage implements BoardStorage, AssetStorage, VersionStora
     return this.pool.end();
   }
 
+  /** Deletes everything stored for a board: its updates, images and versions. */
+  async eraseBoard(boardId: string): Promise<void> {
+    await this.transaction(async (client) => {
+      // board_updates goes with boards (ON DELETE CASCADE).
+      await client.query("DELETE FROM boards WHERE id = $1", [boardId]);
+      await client.query("DELETE FROM board_assets WHERE board_id = $1", [boardId]);
+      await client.query("DELETE FROM board_versions WHERE board_id = $1", [boardId]);
+    });
+  }
+
   private transaction(fn: (client: pg.PoolClient) => Promise<void>): Promise<void> {
     return inTransaction(this.pool, fn);
   }

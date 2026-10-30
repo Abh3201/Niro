@@ -8,7 +8,7 @@ Vercel can serve Niro's **web app** (the pages and the `/api/token` endpoint) on
 | Realtime server | Azure App Service (or any server) | `wss://<realtime-name>.azurewebsites.net` |
 | Postgres | Neon | used only by the realtime server |
 
-The web app only needs two settings: `NIRO_SECRET`, the same one the realtime server has, and `PUBLIC_REALTIME_URL`. It never talks to Postgres or to the realtime server itself; browsers do.
+The web app only needs two settings: `NIRO_SECRET`, the same one the realtime server has, and `PUBLIC_REALTIME_URL`. It never talks to the realtime server itself; browsers do. With [accounts](accounts.md) it also uses the Neon database (Neon's pooled connection string), for sign-in and board lists.
 
 ## What to know first
 
@@ -31,7 +31,9 @@ The web app only needs two settings: `NIRO_SECRET`, the same one the realtime se
 
 4. **Deploy**. Because `apps/web/vercel.json` turns off Vercel's own Git deploys (step 3 explains why), Vercel may create the project without deploying it. That's fine; step 3 deploys it.
 
-Optional: **Settings**, **Functions**, **Function Region**, and pick the one closest to your realtime server and users (for example Mumbai, `bom1`, for Azure's Central India). Only `/api/token` and the first page load run there.
+Optional, for sign-in and My boards: add `DATABASE_URL` (Neon's pooled connection string), `PUBLIC_URL` (`https://` and your domain from step 2), and the Google and email settings in [accounts.md](accounts.md).
+
+Optional: **Settings**, **Functions**, **Function Region**, and pick the one closest to your realtime server and users (for example Mumbai, `bom1`, for Azure's Central India). Only `/api/token`, sign-in, My boards and the first page load run there; with accounts, a region near your Neon database helps most.
 
 ## 2. Add your domain
 
